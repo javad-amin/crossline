@@ -68,6 +68,12 @@ void SettingsActivity::rebuildSettingsLists() {
           (BoardConfig::isX4Pro() || BoardConfig::isX4Classic())) {
         continue;
       }
+      // Title List options are hidden for other themes but stay in the list so they persist.
+      if ((setting.valuePtr == &CrossPointSettings::homeTitleListBooks ||
+           setting.valuePtr == &CrossPointSettings::homeBackground) &&
+          SETTINGS.uiTheme != CrossPointSettings::TITLE_LIST) {
+        continue;
+      }
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
       // Settings merged into "Text Settings"

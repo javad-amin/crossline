@@ -1,5 +1,7 @@
 #pragma once
 
+#include <HalMemory.h>
+
 #include <array>
 #include <string>
 #include <vector>
@@ -62,6 +64,8 @@ class CoverGridHomeUi final : public UiAppHost {
   bool titlesOnly = false;
   int titleSlots = MAX_TITLE_BOOKS;
   uint8_t rowRadius = 0;
+  // Faded sleep image behind the Title List; empty when the setting is off.
+  HalMemory::PsramBuffer background;
   char progressText[12]{};
   // Component styles and interaction tables stay off the render task's stack.
   freeink::ui::BookCardProps card;

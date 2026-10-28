@@ -329,6 +329,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Title List home: index into HOME_TITLE_LIST_COUNTS.
   static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 4, 6, 10};
   uint8_t homeTitleListBooks = 4;
+  // Title List home: 1 = faded copy of the last sleep image behind the list.
+  uint8_t homeBackground = 0;
   int getHomeTitleListBookCount() const {
     return HOME_TITLE_LIST_COUNTS[homeTitleListBooks < sizeof(HOME_TITLE_LIST_COUNTS) ? homeTitleListBooks : 4];
   }

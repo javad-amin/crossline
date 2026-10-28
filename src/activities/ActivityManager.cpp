@@ -16,6 +16,7 @@
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/HeaderBackTapTarget.h"
+#include "components/UITheme.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
@@ -106,6 +107,7 @@ void ActivityManager::loop() {
       if (currentActivity->handleHomeGesture()) {
         return;
       }
+      showLoadingPopup();
       goHome();
       return;
     }
@@ -285,6 +287,11 @@ void ActivityManager::goToBrowser() {
   } else {
     replaceActivity(std::make_unique<OpdsServerListActivity>(renderer, mappedInput, true));
   }
+}
+
+void ActivityManager::showLoadingPopup() {
+  RenderLock lock;
+  GUI.drawPopup(renderer, tr(STR_LOADING));
 }
 
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {

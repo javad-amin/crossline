@@ -24,6 +24,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "HomeBackground.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -660,6 +661,11 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
     renderer.invertScreen();
   }
 
+  home_background::captureFromBitmap(
+      renderer, bitmap, x, y, cropX, cropY,
+      !preserveBackground &&
+          SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE);
+
   const bool absolute = hasGreyscale && renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported();
   if (absolute) {
     if (!renderer.displayGrayscaleBase(sleepGrayscaleMode(renderer))) return;
@@ -785,6 +791,14 @@ void SleepActivity::renderTransparentCustomSleepScreen() const {
     selectRandomSleepFile(TRANSPARENT_SLEEP_LEGACY_DIR, SleepRecentKind::Overlay, selectedPath);
   }
 
+  if (!selectedPath.empty() && renderSleepOverlayPath(selectedPath)) return;
+
+  // No dedicated overlay: reuse the Custom sleep image.
+  if (renderSleepOverlayPath("/sleep.bmp")) return;
+  selectedPath.clear();
+  if (!selectRandomSleepFile("/.sleep", SleepRecentKind::Standard, selectedPath)) {
+    selectRandomSleepFile("/sleep", SleepRecentKind::Standard, selectedPath);
+  }
   if (!selectedPath.empty() && renderSleepOverlayPath(selectedPath)) return;
 
   LOG_ERR("SLP", "No valid transparent sleep overlay found");

@@ -88,6 +88,8 @@ class ActivityManager {
   void goToLibrary();
   void goToBrowser();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
+  // Immediate feedback before a slow screen change; call without holding RenderLock.
+  void showLoadingPopup();
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);

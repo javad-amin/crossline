@@ -1,3 +1,17 @@
+# Crossline
+
+Crossline is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader), built on the 1.6.5 stable release and tuned for the Xteink X4 Pro. Everything below the Crossline section is the original CrossPoint README.
+
+## What Crossline adds to CrossPoint
+
+- **Title List home theme**: recent books shown by title and author only, without covers, as a list styled like the settings rows. The latest book sits at the bottom, is bold and outlined.
+  It is the default theme on first flash for PSRAM devices (X4 Pro, X4 Classic, Sticky).
+- **Home Books setting**: show 1, 2, 4, 6 or 10 recent books (default 10). Rows keep the 10-book size, so fewer books leave the top of the screen free.
+- **Home Background setting**: optionally shows a faded copy of the last sleep image behind the Title List, with the titles in white boxes. Works with both the Custom and Transparent sleep screens.
+- **Power button to Home**: a short power-button press can be mapped to go to Home (Settings → Controls → Short Power Button).
+- **Transparent sleep uses the Custom image**: when there is no `/sleep-overlay` image, the Transparent sleep screen falls back to `/sleep.bmp` or the `/sleep` folder, so one image works for both modes.
+- **Per-book text settings**: font, size, line spacing, margins and other text settings changed while reading are saved for that book only and restored when you reopen it. Device-wide defaults stay untouched.
+
 # CrossPoint Reader
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)

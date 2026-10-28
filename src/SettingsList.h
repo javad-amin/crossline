@@ -251,6 +251,9 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           {StrId::STR_HOME_BOOKS_1, StrId::STR_HOME_BOOKS_2, StrId::STR_HOME_BOOKS_4,
                            StrId::STR_HOME_BOOKS_6, StrId::STR_HOME_BOOKS_10},
                           "homeTitleListBooks", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Enum(StrId::STR_HOME_BACKGROUND, &CrossPointSettings::homeBackground,
+                          {StrId::STR_STATE_OFF, StrId::STR_HOME_BACKGROUND_SLEEP_IMAGE}, "homeBackground",
+                          StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                             StrId::STR_CAT_DISPLAY),
 #if FREEINK_CAP_FRONTLIGHT
@@ -507,11 +510,6 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   }();
 
   std::vector<SettingInfo> v = baseList;
-  if (SETTINGS.uiTheme != CrossPointSettings::TITLE_LIST) {
-    v.erase(std::remove_if(v.begin(), v.end(),
-                           [](const SettingInfo& s) { return s.nameId == StrId::STR_HOME_BOOK_COUNT; }),
-            v.end());
-  }
   if (!BoardConfig::hasTouch()) {
     // The reader menu style stays available on button boards (the toolbar
     // chrome is button-navigable); only the touch controls are hidden.
