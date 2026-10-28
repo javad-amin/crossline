@@ -10,6 +10,7 @@
 #include <limits>
 #include <string>
 
+#include "BookReaderSettings.h"
 #include "I18nKeys.h"
 #include "ReaderFontSizes.h"
 #include "SettingsList.h"
@@ -109,6 +110,11 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   // unconfigured, so the default keeps following the UI language.
   if (keyboardLayouts != 0) {
     doc["keyboardLayouts"] = keyboardLayouts;
+  }
+
+  // While a book is open SETTINGS holds its own text settings; settings.json keeps the device-wide ones.
+  if (const auto* globals = book_reader_settings::globalsWhileReading()) {
+    book_reader_settings::writeSettingsKeys(*globals, doc);
   }
 }
 

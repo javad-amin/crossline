@@ -154,6 +154,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     FORCE_REFRESH = 3,
     FOOTNOTES = 4,
     PWR_CONFIRM = 5,
+    PWR_HOME = 6,
     SHORT_PWRBTN_COUNT
   };
 
@@ -182,7 +183,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, COVER_GRID = 4 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, COVER_GRID = 4, TITLE_LIST = 5 };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -319,7 +320,18 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Defaults to Disabled so shortcut-based bookmark toggling remains opt-in.
   uint8_t longPressMenuFunction = LP_MENU_DISABLED;
   // UI Theme
+  // Title List needs PSRAM (like Cover Grid); boards without it keep Lyra.
+#ifdef BOARD_HAS_PSRAM
+  uint8_t uiTheme = TITLE_LIST;
+#else
   uint8_t uiTheme = LYRA;
+#endif
+  // Title List home: index into HOME_TITLE_LIST_COUNTS.
+  static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 4, 6, 10};
+  uint8_t homeTitleListBooks = 4;
+  int getHomeTitleListBookCount() const {
+    return HOME_TITLE_LIST_COUNTS[homeTitleListBooks < sizeof(HOME_TITLE_LIST_COUNTS) ? homeTitleListBooks : 4];
+  }
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Power button return from footnotes (1 = enabled, 0 = disabled)

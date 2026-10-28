@@ -233,14 +233,16 @@ void HomeActivity::onEnter() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   if (UITheme::getInstance().hasCoverGridHome()) {
     // Screen-lifetime interaction tables and component properties exceed the stack budget.
-    coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
+    coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer, UITheme::hasTitleListHome());
     if (!coverGridUi) LOG_ERR("HOME", "OOM: cover grid UI; using standard home");
   }
-  loadRecentBooks(coverGridUi ? CoverGridHomeUi::MAX_BOOKS : metrics.homeRecentBooksCount);
+  loadRecentBooks(coverGridUi ? coverGridUi->maxBooks() : metrics.homeRecentBooksCount);
   hasContinueReading = !recentBooks.empty();
   if (coverGridUi) {
-    fillCoverGridFromLibrary();
-    resolveGridCoverPaths();
+    if (!coverGridUi->isTitlesOnly()) {
+      fillCoverGridFromLibrary();
+      resolveGridCoverPaths();
+    }
     coverGridUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
   }
 
@@ -387,10 +389,12 @@ void HomeActivity::loop() {
       selectorIndex = base + idx;
       requestUpdate();
     };
+    // Title List draws the latest book at the bottom, so Up moves to older books.
+    const int upStep = coverGridUi->isTitlesOnly() ? +1 : -1;
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up},
-                                         [&cycleBand, bookCount] { cycleBand(0, bookCount, -1); });
+                                         [&cycleBand, bookCount, upStep] { cycleBand(0, bookCount, upStep); });
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down},
-                                         [&cycleBand, bookCount] { cycleBand(0, bookCount, +1); });
+                                         [&cycleBand, bookCount, upStep] { cycleBand(0, bookCount, -upStep); });
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [&cycleBand, bookCount, menuCount] {
       cycleBand(bookCount, menuCount - bookCount, -1);
     });
@@ -477,7 +481,7 @@ void HomeActivity::render(RenderLock&&) {
     if (!firstRenderDone) {
       firstRenderDone = true;
       requestUpdate();
-    } else if (!recentsLoaded && !recentsLoading) {
+    } else if (!recentsLoaded && !recentsLoading && !coverGridUi->isTitlesOnly()) {
       loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT);
       coverGridUi->refreshCoverPaths();
       requestUpdate();

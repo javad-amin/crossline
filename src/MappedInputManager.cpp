@@ -24,6 +24,10 @@ void MappedInputManager::update(const bool deferHomeButtonAction) const {
                                         static_cast<HomeButtonAction>(SETTINGS.homeButtonDoubleTapAction),
                                         static_cast<HomeButtonAction>(SETTINGS.homeButtonLongPressAction));
   }
+  if (homeAction == HomeButtonAction::Ignore && SETTINGS.shortPwrBtn == CrossPointSettings::PWR_HOME &&
+      mapButton(Button::Power, &HalGPIO::wasReleased)) {
+    homeAction = HomeButtonAction::Home;
+  }
   if (deferHomeButtonAction) {
     // Keep the first action observed during a synchronous transfer. Home must
     // still be visible now so the transfer can cancel and unwind promptly.
@@ -319,7 +323,8 @@ bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); 
 bool MappedInputManager::wasReaderMenuSwipeUp() const { return gpio.hasHomeKey() && wasBottomEdgeUpSwipe(); }
 
 bool MappedInputManager::wasHomeGesture() const {
-  return gpio.hasHomeKey() ? homeAction == HomeButtonAction::Home : wasBottomEdgeUpSwipe();
+  if (homeAction == HomeButtonAction::Home) return true;
+  return !gpio.hasHomeKey() && wasBottomEdgeUpSwipe();
 }
 
 bool MappedInputManager::wasLightPanelGesture() const {
