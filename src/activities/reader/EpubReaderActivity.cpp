@@ -21,6 +21,7 @@
 
 #include "../../util/BookmarkFile.h"
 #include "BookmarkEntry.h"
+#include "BookmarkJump.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DictionaryWordSelectActivity.h"
@@ -751,59 +752,61 @@ void EpubReaderActivity::jumpToPercent(int percent) {
   requestUpdate();
 }
 
+void EpubReaderActivity::applyProgressChange(const ProgressChangeResult& sync) {
+  if (sync.hasVisibleTextOffset && sync.spineIndex >= 0 && sync.spineIndex < epub->getSpineItemsCount()) {
+    RenderLock lock;
+    clearDeferredReposition();
+    if (section && currentSpineIndex == sync.spineIndex) {
+      const auto page = section->getPageForVisibleTextOffset(sync.visibleTextOffset);
+      section->currentPage = page.value_or(std::max(0, sync.page));
+    } else {
+      currentSpineIndex = sync.spineIndex;
+      pendingOffsetJump = sync.visibleTextOffset;
+      nextPageNumber = std::max(0, sync.page);
+      section.reset();
+    }
+    requestUpdate();
+    return;
+  }
+
+  int targetSpineIndex = sync.spineIndex;
+  int targetPage = sync.page;
+  const int activeTotalPages = section ? section->estimatedTotalPages() : 0;
+  const bool cachedPageMatchesActiveSection = section && sync.totalPages > 0 && currentSpineIndex == sync.spineIndex &&
+                                              sync.page >= 0 && sync.page < sync.totalPages &&
+                                              activeTotalPages == sync.totalPages;
+
+  if (!cachedPageMatchesActiveSection && sync.hasSavedProgress) {
+    const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
+    CrossPointPosition fallback =
+        ProgressMapper::toCrossPoint(epub, {sync.xpath, sync.percentage}, renderer, currentSpineIndex, totalPages);
+    targetSpineIndex = fallback.spineIndex;
+    targetPage = fallback.pageNumber;
+  }
+
+  RenderLock lock;
+  clearDeferredReposition();
+
+  if (currentSpineIndex != targetSpineIndex) {
+    currentSpineIndex = targetSpineIndex;
+    nextPageNumber = targetPage;
+    section.reset();
+  } else if (section && section->currentPage != targetPage) {
+    const int clampedTargetPage = std::max(0, targetPage);
+    section->currentPage = clampedTargetPage;
+  } else if (!section) {
+    nextPageNumber = targetPage;
+  }
+  requestUpdate();
+}
+
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
   auto progressChangeResultHandler = [this](const ActivityResult& result) {
     loadCachedBookmarks();
     if (result.isCancelled) {
       openReaderMenu();
     } else {
-      const auto& sync = std::get<ProgressChangeResult>(result.data);
-
-      if (sync.hasVisibleTextOffset && sync.spineIndex >= 0 && sync.spineIndex < epub->getSpineItemsCount()) {
-        RenderLock lock;
-        clearDeferredReposition();
-        if (section && currentSpineIndex == sync.spineIndex) {
-          const auto page = section->getPageForVisibleTextOffset(sync.visibleTextOffset);
-          section->currentPage = page.value_or(std::max(0, sync.page));
-        } else {
-          currentSpineIndex = sync.spineIndex;
-          pendingOffsetJump = sync.visibleTextOffset;
-          nextPageNumber = std::max(0, sync.page);
-          section.reset();
-        }
-        requestUpdate();
-        return;
-      }
-
-      int targetSpineIndex = sync.spineIndex;
-      int targetPage = sync.page;
-      const int activeTotalPages = section ? section->estimatedTotalPages() : 0;
-      const bool cachedPageMatchesActiveSection = section && sync.totalPages > 0 &&
-                                                  currentSpineIndex == sync.spineIndex && sync.page >= 0 &&
-                                                  sync.page < sync.totalPages && activeTotalPages == sync.totalPages;
-
-      if (!cachedPageMatchesActiveSection && sync.hasSavedProgress) {
-        const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
-        CrossPointPosition fallback =
-            ProgressMapper::toCrossPoint(epub, {sync.xpath, sync.percentage}, renderer, currentSpineIndex, totalPages);
-        targetSpineIndex = fallback.spineIndex;
-        targetPage = fallback.pageNumber;
-      }
-
-      RenderLock lock;
-      clearDeferredReposition();
-
-      if (currentSpineIndex != targetSpineIndex) {
-        currentSpineIndex = targetSpineIndex;
-        nextPageNumber = targetPage;
-        section.reset();
-      } else if (section && section->currentPage != targetPage) {
-        const int clampedTargetPage = std::max(0, targetPage);
-        section->currentPage = clampedTargetPage;
-      } else if (!section) {
-        nextPageNumber = targetPage;
-      }
-      requestUpdate();
+      applyProgressChange(std::get<ProgressChangeResult>(result.data));
     }
   };
 
@@ -1471,7 +1474,9 @@ void EpubReaderActivity::renderBook() {
   }
 
   if (showBookmarkMessage) {
-    GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
+    GUI.drawPopup(renderer, noBookmarksMessage ? tr(STR_NO_BOOKMARKS)
+                            : bookmarkRemoved  ? tr(STR_BOOKMARK_REMOVED)
+                                               : tr(STR_BOOKMARK_ADDED));
   }
 
   if (showDictionaryMessage) {
@@ -2041,6 +2046,25 @@ void EpubReaderActivity::openOverlay(Overlay target) {
 // Close the overlay back to the reading page. Boards without the Xteink
 // grayscale-AA pass restore the page snapshot and push one FAST refresh -- no
 // re-render, no flash; Xteink boards re-render to restore the AA planes.
+void EpubReaderActivity::jumpToLatestBookmark() {
+  const BookmarkEntry* latest = latestBookmark(cachedBookmarks);
+  if (!latest || !epub) {
+    noBookmarksMessage = true;
+    showBookmarkMessage = true;
+    bookmarkMessageTime = millis();
+    requestUpdate();
+    return;
+  }
+  const ProgressChangeResult target = progressChangeForBookmark(*latest, epub->getSpineItemsCount());
+  // Drop the sheet without repainting the old page; the jump renders the bookmarked one.
+  mappedInput.resetHomeButtonInput();
+  overlay = Overlay::None;
+  overlayPopup.dismiss();
+  toolbarUi.reset();
+  discardOverlayPage();
+  applyProgressChange(target);
+}
+
 void EpubReaderActivity::closeOverlayToPage() {
   mappedInput.resetHomeButtonInput();
   overlay = Overlay::None;
@@ -2068,6 +2092,7 @@ void EpubReaderActivity::renderOverlay() {
   // convention as the panel lists), it only shows once a button has moved it.
   // Panels override below: there the pill marks the open panel on every board.
   model.activeTool = (overlay == Overlay::Toolbar && !panelCursorShown) ? -1 : focusedTool;
+  model.pageBookmarked = currentPageBookmarked;
   // Strings the model points at live here until render() returns.
   std::string chapterTitle, pageInfo;
 
@@ -2165,7 +2190,22 @@ void EpubReaderActivity::handleOverlayInput() {
     requestUpdate();
   };
   const auto toolOverlay = [](int tool) {
-    return tool == 0 ? Overlay::Contents : (tool == 1 ? Overlay::Text : Overlay::More);
+    return tool == READER_TOOL_CONTENTS ? Overlay::Contents : tool == READER_TOOL_TEXT ? Overlay::Text : Overlay::More;
+  };
+  // Bookmark tools act right away instead of opening a panel; true when handled.
+  const auto runBookmarkTool = [this](int tool) {
+    if (tool == READER_TOOL_BOOKMARK) {
+      addBookmark();
+      noBookmarksMessage = false;
+      showBookmarkMessage = true;
+      bookmarkMessageTime = millis();
+      return true;
+    }
+    if (tool == READER_TOOL_LATEST_BOOKMARK) {
+      jumpToLatestBookmark();
+      return true;
+    }
+    return false;
   };
 
   // Touch first: FreeInkUI routes the frame against the tap targets the last
@@ -2180,7 +2220,7 @@ void EpubReaderActivity::handleOverlayInput() {
         return;
       case ReaderToolbarUi::Event::Tool:
         focusedTool = routed.value;
-        openOverlay(toolOverlay(focusedTool));
+        if (!runBookmarkTool(focusedTool)) openOverlay(toolOverlay(focusedTool));
         return;
       case ReaderToolbarUi::Event::PrevChapter:
         gotoSpine(currentSpineIndex - 1);
@@ -2203,19 +2243,19 @@ void EpubReaderActivity::handleOverlayInput() {
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
-      focusedTool = (focusedTool + 2) % 3;
+      focusedTool = stepReaderTool(focusedTool, -1);
       panelCursorShown = true;
       fastRedraw();
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
-      focusedTool = (focusedTool + 1) % 3;
+      focusedTool = stepReaderTool(focusedTool, +1);
       panelCursorShown = true;
       fastRedraw();
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      openOverlay(toolOverlay(focusedTool));
+      if (!runBookmarkTool(focusedTool)) openOverlay(toolOverlay(focusedTool));
       return;
     }
     const bool prev = mappedInput.wasReleased(MappedInputManager::Button::Up);
@@ -2323,6 +2363,7 @@ void EpubReaderActivity::handleOverlayInput() {
       dismissPanel();
       return;
     case ReaderToolbarUi::Event::Tool: {
+      if (runBookmarkTool(routed.value)) return;
       // Sheet-bottom tool switcher: hop straight to another panel.
       const Overlay target = toolOverlay(routed.value);
       if (target != overlay) {
@@ -2668,6 +2709,8 @@ void EpubReaderActivity::addBookmark() {
     currentPageBookmarked = true;
   }
 
+  LOG_DBG("ERS", "Bookmark %s (%u total)", bookmarkRemoved ? "removed" : "added",
+          static_cast<unsigned>(cachedBookmarks.size()));
   if (!BookmarkFile::save(epub->getPath(), cachedBookmarks)) {
     LOG_ERR("ERS", "Failed to save bookmarks");
   }
