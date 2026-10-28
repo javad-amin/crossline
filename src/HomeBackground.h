@@ -2,11 +2,15 @@
 
 #include <HalMemory.h>
 
+#include <cstdint>
+
 class Bitmap;
 class GfxRenderer;
 
 // A faded copy of the last sleep image, shown behind the Title List home.
 namespace home_background {
+// Names the image the next capture comes from; an unchanged image reuses the saved background.
+void setSource(const char* imagePath, uint32_t fileSize, uint32_t modifiedTime);
 // Saves a light dot-pattern rendition of a full-screen sleep bitmap; the frame buffer is left as it was.
 void captureFromBitmap(const GfxRenderer& renderer, const Bitmap& bitmap, int x, int y, float cropX, float cropY,
                        bool inverted);

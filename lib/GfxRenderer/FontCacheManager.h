@@ -41,7 +41,8 @@ class FontCacheManager {
    public:
     explicit PrewarmScope(FontCacheManager& manager);
     ~PrewarmScope();
-    void endScanAndPrewarm();
+    // shouldStop is checked before each font/style group; returns false when it stopped early.
+    bool endScanAndPrewarm(bool (*shouldStop)(void*) = nullptr, void* stopCtx = nullptr);
     PrewarmScope(PrewarmScope&& other) noexcept;
     PrewarmScope& operator=(PrewarmScope&&) = delete;
     PrewarmScope(const PrewarmScope&) = delete;

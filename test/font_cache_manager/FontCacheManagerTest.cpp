@@ -145,3 +145,76 @@ TEST(FontCacheManagerTest, IncrementalPrewarmRequestsAccumulation) {
   ASSERT_EQ(1, font.prewarmCallCount);
   EXPECT_TRUE(font.prewarmCalls[0].accumulate);
 }
+
+namespace {
+struct StopAfter {
+  int allowedGroups;
+  int checks = 0;
+};
+bool stopAfterGroups(void* ctx) {
+  auto* stop = static_cast<StopAfter*>(ctx);
+  return stop->checks++ >= stop->allowedGroups;
+}
+}  // namespace
+
+TEST(FontCacheManagerTest, PrewarmStopsBeforeFirstGroupWhenCancelled) {
+  SdCardFont font;
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> sdFonts{{7, &font}};
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
+
+  StopAfter stop{0};
+  auto scope = manager.createPrewarmScope();
+  manager.recordText("A", 7, EpdFontFamily::REGULAR);
+  manager.recordText("B", 7, EpdFontFamily::BOLD);
+  EXPECT_FALSE(scope.endScanAndPrewarm(&stopAfterGroups, &stop));
+  EXPECT_EQ(0, font.prewarmCallCount);
+}
+
+TEST(FontCacheManagerTest, PrewarmStopsBetweenFontStyleGroups) {
+  SdCardFont font;
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> sdFonts{{7, &font}};
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
+
+  StopAfter stop{1};
+  auto scope = manager.createPrewarmScope();
+  manager.recordText("A", 7, EpdFontFamily::REGULAR);
+  manager.recordText("B", 7, EpdFontFamily::BOLD);
+  manager.recordText("C", 7, EpdFontFamily::ITALIC);
+  EXPECT_FALSE(scope.endScanAndPrewarm(&stopAfterGroups, &stop));
+  EXPECT_EQ(1, font.prewarmCallCount);
+}
+
+TEST(FontCacheManagerTest, PrewarmCompletesWhenNeverCancelled) {
+  SdCardFont font;
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> sdFonts{{7, &font}};
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
+
+  StopAfter stop{100};
+  auto scope = manager.createPrewarmScope();
+  manager.recordText("A", 7, EpdFontFamily::REGULAR);
+  manager.recordText("B", 7, EpdFontFamily::BOLD);
+  EXPECT_TRUE(scope.endScanAndPrewarm(&stopAfterGroups, &stop));
+  EXPECT_EQ(2, font.prewarmCallCount);
+}
+
+TEST(FontCacheManagerTest, CancelledPrewarmLeavesManagerReadyForNextScope) {
+  SdCardFont font;
+  const std::map<int, EpdFontFamily> noBuiltinFonts;
+  const std::map<int, SdCardFont*> sdFonts{{7, &font}};
+  FontCacheManager manager(noBuiltinFonts, sdFonts, kNoTtfFonts);
+
+  {
+    StopAfter stop{0};
+    auto scope = manager.createPrewarmScope();
+    manager.recordText("A", 7, EpdFontFamily::REGULAR);
+    EXPECT_FALSE(scope.endScanAndPrewarm(&stopAfterGroups, &stop));
+  }
+  auto scope = manager.createPrewarmScope();
+  manager.recordText("Z", 7, EpdFontFamily::REGULAR);
+  scope.endScanAndPrewarm();
+  ASSERT_EQ(1, font.prewarmCallCount);
+  EXPECT_STREQ("Z", font.prewarmCalls[0].text);
+}

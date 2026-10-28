@@ -197,9 +197,9 @@ FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manage
   memset(manager_->scanGroupCounts_, 0, sizeof(manager_->scanGroupCounts_));
 }
 
-void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
+bool FontCacheManager::PrewarmScope::endScanAndPrewarm(bool (*shouldStop)(void*), void* stopCtx) {
   manager_->scanMode_ = ScanMode::None;
-  if (manager_->scanCodepointCount_ == 0) return;
+  if (manager_->scanCodepointCount_ == 0) return true;
 
   std::sort(manager_->scanCodepoints_, manager_->scanCodepoints_ + manager_->scanCodepointCount_);
 
@@ -211,9 +211,14 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   // Each packed entry provides four bytes, enough for one UTF-8 codepoint.
   // Encoding high groups first means a terminator can overwrite only a group
   // that has already been prewarmed; unread lower groups remain intact.
+  bool completed = true;
   for (int group = SCAN_GROUP_COUNT - 1; group >= 0; group--) {
     const uint16_t groupCount = manager_->scanGroupCounts_[group];
     if (groupCount == 0) continue;
+    if (shouldStop && shouldStop(stopCtx)) {
+      completed = false;
+      break;
+    }
 
     const uint16_t groupStart = groupStarts[group];
     char* const utf8Text = reinterpret_cast<char*>(manager_->scanCodepoints_ + groupStart);
@@ -233,6 +238,7 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   manager_->scanCodepointCount_ = 0;
   manager_->scanFontCount_ = 0;
   memset(manager_->scanGroupCounts_, 0, sizeof(manager_->scanGroupCounts_));
+  return completed;
 }
 
 FontCacheManager::PrewarmScope::~PrewarmScope() {

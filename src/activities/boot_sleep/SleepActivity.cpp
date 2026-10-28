@@ -26,6 +26,7 @@
 #include "CrossPointState.h"
 #include "HomeBackground.h"
 #include "LastPageSnapshot.h"
+#include "SleepSources.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -46,6 +47,20 @@ constexpr char TRANSPARENT_SLEEP_ROOT_PNG[] = "/sleep-overlay.png";
 constexpr char TRANSPARENT_SLEEP_DIR[] = "/.sleep-overlay";
 constexpr char TRANSPARENT_SLEEP_LEGACY_DIR[] = "/sleep-overlay";
 constexpr size_t MAX_SLEEP_FILE_NAME_LEN = 256;
+
+// One root listing instead of a separate (slow when missing) lookup per sleep source.
+SleepSources scanRootSleepSources() {
+  auto root = Storage.open("/");
+  if (!root || !root.isDirectory()) return SleepSources::unknown();
+  SleepSources sources;
+  char name[32];
+  for (auto entry = root.openNextFile(); entry; entry = root.openNextFile()) {
+    name[0] = '\0';
+    entry.getName(name, sizeof(name));
+    sources.noteRootEntry(name, entry.isDirectory());
+  }
+  return sources;
+}
 constexpr uint8_t MIN_VISIBLE_ALPHA = 8;
 
 struct BitmapPlacement {
@@ -465,6 +480,13 @@ bool selectRandomSleepFile(const char* dirPath, const SleepRecentKind recentKind
   return true;
 }
 
+bool selectRandomSleepFileFrom(const SleepSources& sources, const SleepSources::Source hiddenDir,
+                               const char* hiddenPath, const SleepSources::Source visibleDir, const char* visiblePath,
+                               const SleepRecentKind kind, std::string& selectedPath) {
+  if (sources.has(hiddenDir) && selectRandomSleepFile(hiddenPath, kind, selectedPath)) return true;
+  return sources.has(visibleDir) && selectRandomSleepFile(visiblePath, kind, selectedPath);
+}
+
 bool drawSleepPopupPreservingFrame(GfxRenderer& renderer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int frameThickness = metrics.popupFrameThickness;
@@ -575,14 +597,16 @@ void SleepActivity::renderCustomSleepScreen() const {
   // Look for sleep.bmp on the root of the sd card to determine if we should
   // render a custom sleep screen instead of the default.
   // This takes priority over the /sleep folder.
+  const SleepSources sources = scanRootSleepSources();
   HalFile file;
-  if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
+  if (sources.has(SleepSources::SLEEP_BMP) && Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
     Bitmap bitmap(file, true,
                   renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
                       display.getController() == HalDisplay::Controller::SSD1677 &&
                       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading: /sleep.bmp");
+      home_background::setSource("/sleep.bmp", file.fileSize(), file.modificationTime());
       renderBitmapSleepScreen(bitmap);
       file.close();
       return;
@@ -591,9 +615,8 @@ void SleepActivity::renderCustomSleepScreen() const {
   }
 
   std::string selectedPath;
-  if (!selectRandomSleepFile("/.sleep", SleepRecentKind::Standard, selectedPath)) {
-    selectRandomSleepFile("/sleep", SleepRecentKind::Standard, selectedPath);
-  }
+  selectRandomSleepFileFrom(sources, SleepSources::SLEEP_HIDDEN_DIR, "/.sleep", SleepSources::SLEEP_DIR, "/sleep",
+                            SleepRecentKind::Standard, selectedPath);
 
   if (!selectedPath.empty()) {
     HalFile randFile;
@@ -605,6 +628,7 @@ void SleepActivity::renderCustomSleepScreen() const {
                         display.getController() == HalDisplay::Controller::SSD1677 &&
                         SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        home_background::setSource(selectedPath.c_str(), randFile.fileSize(), randFile.modificationTime());
         renderBitmapSleepScreen(bitmap);
         randFile.close();
         return;
@@ -723,6 +747,7 @@ bool SleepActivity::renderSleepOverlayFile(HalFile& file, const char* pathForLog
   LOG_DBG("SLP", "Rendering regular BMP sleep overlay: %s (%dx%d)", pathForLog, bitmap.getWidth(), bitmap.getHeight());
   // drawBitmap leaves white pixels untouched; skipping the initial clear makes
   // them transparent while retaining the existing grayscale pipeline.
+  home_background::setSource(pathForLog, file.fileSize(), file.modificationTime());
   renderBitmapSleepScreen(bitmap, true);
   return true;
 }
@@ -786,22 +811,20 @@ bool SleepActivity::renderSleepOverlayPath(const std::string& path) const {
 }
 
 void SleepActivity::renderTransparentCustomSleepScreen() const {
-  if (renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_BMP)) return;
-  if (renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_PNG)) return;
+  const SleepSources sources = scanRootSleepSources();
+  if (sources.has(SleepSources::OVERLAY_BMP) && renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_BMP)) return;
+  if (sources.has(SleepSources::OVERLAY_PNG) && renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_PNG)) return;
 
   std::string selectedPath;
-  if (!selectRandomSleepFile(TRANSPARENT_SLEEP_DIR, SleepRecentKind::Overlay, selectedPath)) {
-    selectRandomSleepFile(TRANSPARENT_SLEEP_LEGACY_DIR, SleepRecentKind::Overlay, selectedPath);
-  }
-
+  selectRandomSleepFileFrom(sources, SleepSources::OVERLAY_HIDDEN_DIR, TRANSPARENT_SLEEP_DIR, SleepSources::OVERLAY_DIR,
+                            TRANSPARENT_SLEEP_LEGACY_DIR, SleepRecentKind::Overlay, selectedPath);
   if (!selectedPath.empty() && renderSleepOverlayPath(selectedPath)) return;
 
   // No dedicated overlay: reuse the Custom sleep image.
-  if (renderSleepOverlayPath("/sleep.bmp")) return;
+  if (sources.has(SleepSources::SLEEP_BMP) && renderSleepOverlayPath("/sleep.bmp")) return;
   selectedPath.clear();
-  if (!selectRandomSleepFile("/.sleep", SleepRecentKind::Standard, selectedPath)) {
-    selectRandomSleepFile("/sleep", SleepRecentKind::Standard, selectedPath);
-  }
+  selectRandomSleepFileFrom(sources, SleepSources::SLEEP_HIDDEN_DIR, "/.sleep", SleepSources::SLEEP_DIR, "/sleep",
+                            SleepRecentKind::Standard, selectedPath);
   if (!selectedPath.empty() && renderSleepOverlayPath(selectedPath)) return;
 
   LOG_ERR("SLP", "No valid transparent sleep overlay found");
@@ -884,6 +907,7 @@ void SleepActivity::renderCoverSleepScreen() const {
     Bitmap bitmap(file);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
+      home_background::setSource(coverBmpPath.c_str(), file.fileSize(), file.modificationTime());
       renderBitmapSleepScreen(bitmap);
       return;
     }

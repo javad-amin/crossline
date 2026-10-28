@@ -256,7 +256,7 @@ int EpubReaderActivity::bookPercentFor(const ChapterPosition& position) const {
 }
 
 void EpubReaderActivity::openReaderMenu() {
-  pendingManualTurn = 0;
+  pendingTurns.clear();
   if (usesToolbarMenu()) {
     // Reached from a child activity's result handler (footnotes, bookmarks,
     // go-to-percent... cancelled back to the menu), so the framebuffer holds
@@ -402,8 +402,9 @@ void EpubReaderActivity::loop() {
             const auto t0 = millis();
             auto scope = fcm->createPrewarmScope();
             p->render(renderer, SETTINGS.getReaderFontId(), 0, 0);
-            scope.endScanAndPrewarm();
-            LOG_DBG("ERS", "Idle prewarm: page %d in %lums", nextPage, millis() - t0);
+            // Stop between font styles once a button goes down, so the press is handled right away.
+            const bool completed = scope.endScanAndPrewarm([](void*) { return gpio.rawInputActive(); }, nullptr);
+            LOG_DBG("ERS", "Idle prewarm: page %d in %lums%s", nextPage, millis() - t0, completed ? "" : " (stopped)");
           }
         }
       }
@@ -611,7 +612,7 @@ void EpubReaderActivity::loop() {
     // Toolbar style: the page is on screen and in the framebuffer, so paint the
     // toolbar over it (one refresh) instead of pushing a full-screen menu.
     if (usesToolbarMenu() && section) {
-      pendingManualTurn = 0;
+      pendingTurns.clear();
       openOverlay(Overlay::Toolbar);
     } else {
       openReaderMenu();
@@ -642,14 +643,16 @@ void EpubReaderActivity::loop() {
 
   constexpr unsigned long kMinManualTurnGapMs = 200;
   const bool turnGuardActive = RenderLock::peek() || (millis() - lastPageTurnTime) < kMinManualTurnGapMs;
-  if (pendingManualTurn != 0 && !turnGuardActive) {
+  if (!pendingTurns.empty() && !turnGuardActive) {
     if (!section) {
-      pendingManualTurn = 0;
+      pendingTurns.clear();
       return;
     }
-    const bool forward = pendingManualTurn > 0;
-    pendingManualTurn = 0;
-    pageTurn(forward);
+    // Presses made while the last page was drawing are applied as one jump.
+    const int8_t turns = pendingTurns.take();
+    for (int i = 0; i < std::abs(turns) && section; i++) {
+      if (!pageTurn(turns > 0)) break;
+    }
     requestUpdate();
     return;
   }
@@ -693,7 +696,7 @@ void EpubReaderActivity::loop() {
   }
 
   if (turnGuardActive) {
-    pendingManualTurn = prevTriggered ? -1 : 1;
+    pendingTurns.add(!prevTriggered);
     return;
   }
 

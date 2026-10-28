@@ -480,7 +480,8 @@ void HomeActivity::render(RenderLock&&) {
     }
     if (!firstRenderDone) {
       firstRenderDone = true;
-      requestUpdate();
+      // The second pass only exists to draw thumbnails at their measured size.
+      if (!coverGridUi->isTitlesOnly()) requestUpdate();
     } else if (!recentsLoaded && !recentsLoading && !coverGridUi->isTitlesOnly()) {
       loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT);
       coverGridUi->refreshCoverPaths();

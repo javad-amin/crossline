@@ -8,12 +8,39 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "HomeBackgroundKey.h"
 
 namespace {
 constexpr char HOME_BACKGROUND_FILE[] = "/.crosspoint/home_background.bin";
+constexpr char HOME_BACKGROUND_KEY_FILE[] = "/.crosspoint/home_background.key";
+
+char sourcePath[256] = "";
+uint32_t sourceSize = 0;
+uint32_t sourceTime = 0;
+
+// Empty when there is no saved key or it can't be read.
+void readSavedKey(char* out, const size_t len) {
+  out[0] = '\0';
+  HalFile file;
+  if (!Storage.exists(HOME_BACKGROUND_KEY_FILE) || !Storage.openFileForRead("HBG", HOME_BACKGROUND_KEY_FILE, file)) {
+    return;
+  }
+  const int n = file.read(reinterpret_cast<uint8_t*>(out), len - 1);
+  out[n > 0 ? n : 0] = '\0';
+}
+
+void writeSavedKey(const char* key) {
+  HalFile file;
+  if (!key[0] || !Storage.openFileForWrite("HBG", HOME_BACKGROUND_KEY_FILE, file) ||
+      file.write(reinterpret_cast<const uint8_t*>(key), strlen(key)) != strlen(key)) {
+    file.close();
+    Storage.remove(HOME_BACKGROUND_KEY_FILE);
+  }
+}
 
 // Full-contrast 1-bit rendition: black stays black, the two grays use a 4x4 ordered dither (~2/3 and ~1/3 ink).
 bool isDot(const uint8_t level, const int x, const int y) {
@@ -67,9 +94,27 @@ bool drawFaded(const GfxRenderer& renderer, const Bitmap& bitmap, const int x, c
 
 namespace home_background {
 
-void captureFromBitmap(const GfxRenderer& renderer, const Bitmap& bitmap, const int x, const int y,
-                       const float cropX, const float cropY, const bool inverted) {
+void setSource(const char* imagePath, const uint32_t fileSize, const uint32_t modifiedTime) {
+  snprintf(sourcePath, sizeof(sourcePath), "%s", imagePath ? imagePath : "");
+  sourceSize = fileSize;
+  sourceTime = modifiedTime;
+}
+
+void captureFromBitmap(const GfxRenderer& renderer, const Bitmap& bitmap, const int x, const int y, const float cropX,
+                       const float cropY, const bool inverted) {
   if (!SETTINGS.homeBackground) return;
+  char key[HOME_BACKGROUND_KEY_LEN];
+  makeHomeBackgroundKey(key, sizeof(key), sourcePath, sourceSize, sourceTime, inverted);
+  sourcePath[0] = '\0';
+  {
+    char savedKey[HOME_BACKGROUND_KEY_LEN];
+    readSavedKey(savedKey, sizeof(savedKey));
+    if (homeBackgroundReusable(savedKey, key) && Storage.exists(HOME_BACKGROUND_FILE)) {
+      LOG_DBG("HBG", "Reusing home background for %s", key);
+      return;
+    }
+  }
+  Storage.remove(HOME_BACKGROUND_KEY_FILE);
   uint8_t* frame = renderer.getFrameBuffer();
   const size_t total = renderer.getBufferSize();
   // PSRAM keeps the caller's frame safe while the faded copy is drawn into the frame buffer.
@@ -93,6 +138,8 @@ void captureFromBitmap(const GfxRenderer& renderer, const Bitmap& bitmap, const 
   if (!ok) {
     LOG_ERR("HBG", "Failed to save %s", HOME_BACKGROUND_FILE);
     Storage.remove(HOME_BACKGROUND_FILE);
+  } else {
+    writeSavedKey(key);
   }
   memcpy(frame, saved.get(), total);
 }
