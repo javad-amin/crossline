@@ -353,7 +353,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Defaults to Disabled so shortcut-based bookmark toggling remains opt-in.
   uint8_t longPressMenuFunction = LP_MENU_DISABLED;
   // UI Theme
+  // Title List needs PSRAM (like Cover Grid); boards without it keep Lyra.
+#ifdef BOARD_HAS_PSRAM
+  uint8_t uiTheme = TITLE_LIST;
+#else
   uint8_t uiTheme = LYRA;
+#endif
   // Title List home: index into HOME_TITLE_LIST_COUNTS.
   static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 4, 6, 10};
   uint8_t homeTitleListBooks = 4;
