@@ -10,6 +10,7 @@ Crossline is a personal fork of [CrossPoint Reader](https://github.com/crosspoin
 - **Home Background setting**: optionally shows a faded copy of the last sleep image behind the Title List, with the titles in white boxes. Works with both the Custom and Transparent sleep screens.
 - **Power button to Home**: a short power-button press can be mapped to go to Home (Settings → Controls → Short Power Button).
 - **Transparent sleep uses the Custom image**: when there is no `/sleep-overlay` image, the Transparent sleep screen falls back to `/sleep.bmp` or the `/sleep` folder, so one image works for both modes.
+- **Home and Sleep in the control center**: the pull-down panel has Home and Sleep tiles.
 - **Per-book text settings**: font, size, line spacing, margins and other text settings changed while reading are saved for that book only and restored when you reopen it. Device-wide defaults stay untouched.
 
 # CrossPoint Reader

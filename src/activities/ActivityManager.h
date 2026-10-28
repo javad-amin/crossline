@@ -66,6 +66,9 @@ class ActivityManager {
   // This variable must only be set by the main loop, to avoid race conditions
   std::atomic<bool> requestedUpdate{false};
 
+  // Set by UI that wants to sleep; main loop consumes it and runs enterDeepSleep().
+  bool sleepRequested = false;
+
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : renderer(renderer), mappedInput(mappedInput), renderingMutex(xSemaphoreCreateMutex()) {
@@ -104,6 +107,12 @@ class ActivityManager {
   void popActivity();
 
   bool preventAutoSleep() const;
+  void requestSleep() { sleepRequested = true; }
+  bool consumeSleepRequest() {
+    const bool requested = sleepRequested;
+    sleepRequested = false;
+    return requested;
+  }
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
   bool handleForcedRefresh();

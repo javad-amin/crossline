@@ -36,8 +36,8 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   int panelBottom = 0;
 
   // Quick-setting tiles, in grid order (2 columns): night mode, refresh,
-  // orientation, touch. Fixed set — shown on touch boards, absent elsewhere.
-  static constexpr int kTileCount = 4;
+  // orientation, touch, home, sleep. Fixed set — shown on touch boards, absent elsewhere.
+  static constexpr int kTileCount = 6;
 
   // fui::SliderRowProps and fui::TileGridProps embed a 324-byte fui::StyleSet,
   // so the props the render path fills in live here instead of on the stack

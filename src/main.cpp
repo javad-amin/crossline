@@ -719,6 +719,12 @@ void loop() {
   }
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
+  if (activityManager.consumeSleepRequest()) {
+    // Let the screen under a closed overlay repaint first, so Transparent sleep keeps the page.
+    activityManager.requestUpdateAndWait();
+    enterDeepSleep();
+    return;
+  }
   if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);

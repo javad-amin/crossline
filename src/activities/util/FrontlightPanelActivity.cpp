@@ -12,6 +12,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "activities/ActivityManager.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/icons/customListIcons.h"
@@ -178,6 +179,14 @@ void FrontlightPanelActivity::runTile(const int idx) {
       }
       SETTINGS.saveToFile();
       requestUpdate();
+      break;
+    case 4:  // Home
+      activityManager.showLoadingPopup();
+      activityManager.goHome();
+      break;
+    case 5:  // Sleep, from the screen under the panel
+      activityManager.requestSleep();
+      close();
       break;
     default:
       break;
@@ -387,12 +396,14 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     snprintf(touchLabel, sizeof(touchLabel), "%s %s", tr(STR_TOUCH_TOGGLE),
              I18N.get(touchOn ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF));
 
-    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel, touchLabel};
+    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH), orientLabel,
+                                      touchLabel,         tr(STR_HOME_SHORTCUT), tr(STR_SLEEP)};
     const fui::State states[kTileCount] = {SETTINGS.screenInverted ? fui::StateChecked : fui::StateNormal,
                                            fui::StateNormal, fui::StateNormal,
                                            // Filled when touch reader controls are OFF — the non-default,
                                            // attention-worthy state.
-                                           touchOn ? fui::StateNormal : fui::StateChecked};
+                                           touchOn ? fui::StateNormal : fui::StateChecked, fui::StateNormal,
+                                           fui::StateNormal};
 
     for (int id = 0; id < kTileCount; ++id) {
       gridItems[id].label = labels[id];
