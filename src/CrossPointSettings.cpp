@@ -11,6 +11,7 @@
 #include <limits>
 #include <string>
 
+#include "BookReaderSettings.h"
 #include "I18nKeys.h"
 #include "ReaderFontSizes.h"
 #include "ReaderLineSpacing.h"
@@ -121,6 +122,11 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   }
 
   bleturner::writeJson(ble, doc);
+
+  // While a book is open SETTINGS holds its own text settings; settings.json keeps the device-wide ones.
+  if (const auto* globals = book_reader_settings::globalsWhileReading()) {
+    book_reader_settings::writeSettingsKeys(*globals, doc);
+  }
 }
 
 bool CrossPointSettings::fromJson(JsonVariantConst doc) {

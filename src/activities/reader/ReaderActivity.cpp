@@ -12,6 +12,7 @@
 #include <cstdio>
 
 #include "CrossPointSettings.h"
+#include "BookReaderSettings.h"
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
 #include "ReaderUtils.h"
@@ -73,6 +74,8 @@ void ReaderActivity::onEnter() {
     APP_STATE.saveToFile();
   }
 
+  // Before fonts load and pages are laid out, so the book's own text settings drive both.
+  if (!FsHelpers::hasXtcExtension(bookPath)) book_reader_settings::enter(bookPath);
   sdFontSystem.ensureLoaded(renderer);
   applyInitialOrientation();
 
@@ -121,9 +124,13 @@ void ReaderActivity::onExit() {
 
   endOfBookOptions.reset();
   endOfBookOptionsReady.store(false, std::memory_order_release);
+  book_reader_settings::exit();
 }
 
-void ReaderActivity::prepareForSleep() { flushReaderSession(); }
+void ReaderActivity::prepareForSleep() {
+  book_reader_settings::save();
+  flushReaderSession();
+}
 
 void ReaderActivity::flushReaderSession() {
   if (!readerSession.isEmitWorthy() || !pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) {
