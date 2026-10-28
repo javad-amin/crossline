@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "EndOfBookOptions.h"
+#include "LastPageSnapshot.h"
 #include "activities/Activity.h"
 
 class ReaderActivity : public Activity {
@@ -18,7 +19,10 @@ class ReaderActivity : public Activity {
   std::atomic<bool> endOfBookOptionsReady{false};
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
-  void markPageRendered() { pageRendered.store(true, std::memory_order_release); }
+  void markPageRendered() {
+    pageRendered.store(true, std::memory_order_release);
+    last_page::remember(renderer);
+  }
   void rememberBookOnceRendered();
 
   explicit ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,

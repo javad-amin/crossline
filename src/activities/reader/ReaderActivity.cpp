@@ -69,6 +69,7 @@ void ReaderActivity::onEnter() {
 
   // Before fonts load and pages are laid out, so the book's own text settings drive both.
   if (!FsHelpers::hasXtcExtension(bookPath)) book_reader_settings::enter(bookPath);
+  last_page::begin();
   sdFontSystem.ensureLoaded(renderer);
   applyInitialOrientation();
 
@@ -106,6 +107,7 @@ void ReaderActivity::onExit() {
   endOfBookOptionsReady.store(false, std::memory_order_release);
   // Also runs on deep sleep: goToSleep() exits the reader first.
   book_reader_settings::exit();
+  last_page::persist(renderer);
 }
 
 bool ReaderActivity::handleBackNavigation() {

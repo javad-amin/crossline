@@ -25,6 +25,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "HomeBackground.h"
+#include "LastPageSnapshot.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -537,6 +538,8 @@ void SleepActivity::onEnter() {
     if (APP_STATE.lastSleepFromReader) {
       renderer.setOrientation(GfxRenderer::Orientation::Portrait);
     }
+    // Overlay the last book page, never whatever screen happened to be open (Home, a menu, the panel).
+    if (!last_page::load(renderer)) renderer.clearScreen();
     releaseSdFontCachesForDecode(renderer);
     return renderTransparentCustomSleepScreen();
   }
