@@ -16,6 +16,7 @@
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
 #include "ReaderToolbarUi.h"
+#include "ReaderTools.h"
 #include "components/OptionPopup.h"
 
 class EpubReaderActivity final : public ReaderActivity {
@@ -42,6 +43,7 @@ class EpubReaderActivity final : public ReaderActivity {
   bool skipNextButtonCheck = false;
   bool automaticPageTurnActive = false;
   bool showBookmarkMessage = false;
+  bool noBookmarksMessage = false;  // the bookmark popup says "No bookmarks"
   bool showDictionaryMessage = false;
   unsigned long dictionaryMessageTime = 0UL;
   bool currentPageBookmarked = false;
@@ -59,8 +61,8 @@ class EpubReaderActivity final : public ReaderActivity {
   // Toolbar; its tools open the Contents/Text/More bottom-sheet panels.
   enum class Overlay { None, Toolbar, Contents, Text, More };
   Overlay overlay = Overlay::None;
-  int focusedTool = 0;  // toolbar tool focus: 0=Contents, 1=Text, 2=More
-  int panelIndex = 0;   // selected row within the active panel
+  int focusedTool = READER_TOOL_CONTENTS;  // toolbar tool in focus (ReaderTool)
+  int panelIndex = 0;                      // selected row within the active panel
   // Panel list navigation: a tap steps one row, a hold jumps PANEL_HOLD_STEP rows in one go
   // (a contents list runs to hundreds of chapters). One jump per hold, not a repeat -- every
   // step repaints the panel, so repeating is bounded by the e-ink refresh anyway and reads as
@@ -142,6 +144,8 @@ class EpubReaderActivity final : public ReaderActivity {
   // Toolbar reader menu (see Overlay above).
   bool usesToolbarMenu() const;
   void openOverlay(Overlay target);
+  void jumpToLatestBookmark();
+  void applyProgressChange(const ProgressChangeResult& target);
   void closeOverlayToPage();
   void discardOverlayPage();
   void handleOverlayInput();

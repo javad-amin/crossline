@@ -9,6 +9,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "ReaderTools.h"
 #include "components/UITheme.h"
 #include "components/icons/readerToolbarIcons.h"
 
@@ -32,7 +33,7 @@ constexpr int16_t kScrubGap = 12;     // air between the buttons and the track
 // pill. The whole slot is the tap target; the row height sets its size.
 constexpr int16_t kToolRowH = 80;
 constexpr int16_t kToolPillInset = 10;
-constexpr int kToolCount = 3;
+constexpr int kToolCount = READER_TOOL_COUNT;
 // Bottom sheet height for the panels. ListNav fits whole rows in the remaining
 // list area; any spare pixels stay between the list and the switcher.
 constexpr int kPanelHeightPercent = 62;
@@ -103,9 +104,13 @@ void ReaderToolbarUi::screenFn(UiScreen& screen, void* user) {
 // tiles, no labels -- the glyphs carry the meaning).
 void ReaderToolbarUi::buildToolRow(UiScreen& screen, const fui::LayoutAnchor anchor, const int16_t sideInset) {
   const auto& tokens = screen.theme();
-  const fui::BitmapRef icons[kToolCount] = {fui::bitmapFromIcon(icon_reader_contents_24),
-                                            fui::bitmapFromIcon(icon_reader_text_24),
-                                            fui::bitmapFromIcon(icon_reader_more_24)};
+  fui::BitmapRef icons[kToolCount];
+  icons[READER_TOOL_CONTENTS] = fui::bitmapFromIcon(icon_reader_contents_24);
+  icons[READER_TOOL_TEXT] = fui::bitmapFromIcon(icon_reader_text_24);
+  icons[READER_TOOL_BOOKMARK] =
+      fui::bitmapFromIcon(model_.pageBookmarked ? icon_reader_bookmarked_24 : icon_reader_bookmark_24);
+  icons[READER_TOOL_LATEST_BOOKMARK] = fui::bitmapFromIcon(icon_reader_latest_bookmark_24);
+  icons[READER_TOOL_MORE] = fui::bitmapFromIcon(icon_reader_more_24);
   // sideInset absorbs the difference between the two hosts' content bands
   // (the toolbar's is spaceLg-inset, the panel's is full width): the slots
   // must land on the same x either way, or the icons jump when a tap swaps

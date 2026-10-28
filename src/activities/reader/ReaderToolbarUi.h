@@ -38,8 +38,9 @@ class ReaderToolbarUi : public UiAppHost {
     int selectedIndex = -1;  // row the buttons' cursor sits on; -1 = none shown
     std::function<std::string(int)> rowText;
     std::function<std::string(int)> rowValue;
-    // Tile row: the tool in focus (toolbar) / the open panel (panel). 0..2.
+    // Tile row: the tool in focus (toolbar) / the open panel (panel), a ReaderTool.
     int activeTool = 0;
+    bool pageBookmarked = false;  // bookmark tool shows the "bookmarked" glyph
     // Button boards keep the theme's denser list row height (as every other
     // list does there); touch boards use FreeInkUI's finger-sized rows.
     bool denseRows = false;
