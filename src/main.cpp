@@ -636,6 +636,28 @@ void loop() {
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
       }
+#ifdef CROSSLINE_SERIAL_INPUT
+      // Test builds: CMD:PRESS:<BACK|CONFIRM|LEFT|RIGHT|UP|DOWN|POWER>[:holdMs], CMD:SLEEP
+      if (cmd.startsWith("PRESS:")) {
+        static constexpr const char* NAMES[] = {"BACK", "CONFIRM", "LEFT", "RIGHT", "UP", "DOWN", "POWER"};
+        String arg = cmd.substring(6);
+        unsigned long holdMs = 80;
+        const int colon = arg.indexOf(':');
+        if (colon >= 0) {
+          holdMs = arg.substring(colon + 1).toInt();
+          arg = arg.substring(0, colon);
+        }
+        for (uint8_t i = 0; i < 7; i++) {
+          if (arg == NAMES[i]) {
+            LOG_INF("TEST", "inject %s hold=%lu", NAMES[i], holdMs);
+            gpio.injectTap(i, holdMs);
+          }
+        }
+      } else if (cmd == "SLEEP") {
+        LOG_INF("TEST", "inject sleep");
+        activityManager.requestSleep();
+      }
+#endif
     }
   }
 

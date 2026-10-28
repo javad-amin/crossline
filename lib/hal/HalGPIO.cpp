@@ -144,19 +144,49 @@ void HalGPIO::update() {
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
+#ifdef CROSSLINE_SERIAL_INPUT
+  injectPressedMask = 0;
+  injectReleasedMask = 0;
+  if (injectHeldMask && millis() - injectDownAt >= injectHoldMs) {
+    injectReleasedMask = injectHeldMask;
+    injectHeldMask = 0;
+  } else if (!injectHeldMask && injectPendingButton < 8) {
+    injectHeldMask = injectPressedMask = static_cast<uint8_t>(1u << injectPendingButton);
+    injectPendingButton = 0xFF;
+    injectDownAt = millis();
+  }
+#endif
 }
+
+#ifdef CROSSLINE_SERIAL_INPUT
+void HalGPIO::injectTap(const uint8_t buttonIndex, const unsigned long holdMs) {
+  injectPendingButton = buttonIndex;
+  injectHoldMs = holdMs;
+}
+#define INJECTED(mask, index) (((mask) >> (index)) & 1u)
+#define INJECTED_ANY(mask) ((mask) != 0)
+#else
+#define INJECTED(mask, index) false
+#define INJECTED_ANY(mask) false
+#endif
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
-bool HalGPIO::isPressed(uint8_t buttonIndex) const { return inputMgr.isPressed(buttonIndex); }
+bool HalGPIO::isPressed(uint8_t buttonIndex) const {
+  return inputMgr.isPressed(buttonIndex) || INJECTED(injectHeldMask, buttonIndex);
+}
 
-bool HalGPIO::wasPressed(uint8_t buttonIndex) const { return inputMgr.wasPressed(buttonIndex); }
+bool HalGPIO::wasPressed(uint8_t buttonIndex) const {
+  return inputMgr.wasPressed(buttonIndex) || INJECTED(injectPressedMask, buttonIndex);
+}
 
-bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed(); }
+bool HalGPIO::wasAnyPressed() const { return inputMgr.wasAnyPressed() || INJECTED_ANY(injectPressedMask); }
 
-bool HalGPIO::wasReleased(uint8_t buttonIndex) const { return inputMgr.wasReleased(buttonIndex); }
+bool HalGPIO::wasReleased(uint8_t buttonIndex) const {
+  return inputMgr.wasReleased(buttonIndex) || INJECTED(injectReleasedMask, buttonIndex);
+}
 
-bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased(); }
+bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased() || INJECTED_ANY(injectReleasedMask); }
 
 bool HalGPIO::rawInputActive() {
   if (inputMgr.isPowerButtonPhysicallyPressed()) return true;
@@ -167,9 +197,21 @@ bool HalGPIO::rawInputActive() {
   return (g1.raw >= 0 && g1.raw < kIdleRailMin) || (g2.raw >= 0 && g2.raw < kIdleRailMin);
 }
 
-unsigned long HalGPIO::getHeldTime() const { return inputMgr.getHeldTime(); }
+unsigned long HalGPIO::getHeldTime() const {
+#ifdef CROSSLINE_SERIAL_INPUT
+  if (injectHeldMask) return millis() - injectDownAt;
+  if (injectReleasedMask) return injectHoldMs;
+#endif
+  return inputMgr.getHeldTime();
+}
 
-unsigned long HalGPIO::getPowerButtonHeldTime() const { return inputMgr.getPowerButtonHeldTime(); }
+unsigned long HalGPIO::getPowerButtonHeldTime() const {
+#ifdef CROSSLINE_SERIAL_INPUT
+  if (INJECTED(injectHeldMask, BTN_POWER)) return millis() - injectDownAt;
+  if (INJECTED(injectReleasedMask, BTN_POWER)) return injectHoldMs;
+#endif
+  return inputMgr.getPowerButtonHeldTime();
+}
 
 bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
 

@@ -46,7 +46,20 @@ class HalGPIO {
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
 
+#ifdef CROSSLINE_SERIAL_INPUT
+  // Test builds only: one synthetic button tap at a time, merged into the real button state.
+  uint8_t injectPendingButton = 0xFF;
+  unsigned long injectHoldMs = 0;
+  uint8_t injectHeldMask = 0;
+  uint8_t injectPressedMask = 0;
+  uint8_t injectReleasedMask = 0;
+  unsigned long injectDownAt = 0;
+#endif
+
  public:
+#ifdef CROSSLINE_SERIAL_INPUT
+  void injectTap(uint8_t buttonIndex, unsigned long holdMs);
+#endif
   enum class DeviceType : uint8_t { X4, X3 };
 
  private:
