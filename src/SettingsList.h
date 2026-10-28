@@ -239,6 +239,7 @@ inline std::vector<ShortPowerButtonOption> shortPowerButtonOptions() {
     options.push_back({StrId::STR_KOSYNC, CrossPointSettings::PWR_SYNC});
     options.push_back({StrId::STR_READER_MENU, CrossPointSettings::PWR_READER_MENU});
   }
+  options.push_back({StrId::STR_HOME_SHORTCUT, CrossPointSettings::PWR_HOME});
   return options;
 }
 
@@ -268,8 +269,10 @@ inline SettingInfo buildShortPowerButtonSetting() {
 
 inline std::vector<StrId> homeThemeValues() {
   static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                     StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_COVER_GRID};
-  const size_t count = UITheme::supportsCoverGrid() ? std::size(VALUES) : std::size(VALUES) - 1;
+                                     StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_COVER_GRID,
+                                     StrId::STR_THEME_TITLE_LIST};
+  // Values are stored by index, so the PSRAM-only home screens can only be dropped from the end.
+  const size_t count = UITheme::supportsCoverGrid() ? std::size(VALUES) : std::size(VALUES) - 2;
   return {VALUES, VALUES + count};
 }
 
@@ -312,6 +315,11 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   if (BoardConfig::hasTouch()) {
     v.erase(
         std::remove_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_LONG_PRESS_MENU; }),
+        v.end());
+  }
+  if (SETTINGS.uiTheme != CrossPointSettings::TITLE_LIST) {
+    v.erase(
+        std::remove_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_HOME_BOOK_COUNT; }),
         v.end());
   }
   if (registry && registry->getFamilyCount() > 0) {

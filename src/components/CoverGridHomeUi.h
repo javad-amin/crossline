@@ -17,8 +17,11 @@ class CoverGridHomeUi final : public UiAppHost {
   static constexpr int GRID_COLUMNS = 3;
   static constexpr int GRID_ROWS = 2;
   static constexpr int MAX_BOOKS = 1 + GRID_COLUMNS * GRID_ROWS;
+  static constexpr int MAX_TITLE_BOOKS = 10;
   static_assert(MAX_BOOKS <= HomeCoverCache::MAX_COVERS);
-  explicit CoverGridHomeUi(GfxRenderer& renderer);
+  CoverGridHomeUi(GfxRenderer& renderer, bool titlesOnly);
+  bool isTitlesOnly() const { return titlesOnly; }
+  int maxBooks() const { return titlesOnly ? titleSlots : MAX_BOOKS; }
   void begin(const std::vector<RecentBook>& books, bool hasOpds, bool hasContinueReading);
   void refreshCoverPaths();
   void setSelection(int selection) { selected = selection; }
@@ -37,6 +40,8 @@ class CoverGridHomeUi final : public UiAppHost {
   void drawEmpty(UiScreen& screen);
   void drawCurrent(UiScreen& screen, freeink::ui::Rect rect, int coverRowHeight);
   void drawGrid(UiScreen& screen);
+  void drawTitleList(UiScreen& screen);
+  bool paintTitleRow(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, size_t index);
   freeink::ui::Rect layoutGrid(freeink::ui::Rect rect);
   void drawTabs(UiScreen& screen, freeink::ui::Rect rect);
   bool paintFramedCover(freeink::ui::DrawTarget& target, freeink::ui::Rect rect, size_t index);
@@ -54,6 +59,9 @@ class CoverGridHomeUi final : public UiAppHost {
   int progress = -1;
   bool hasOpds = false;
   bool hasContinueReading = false;
+  bool titlesOnly = false;
+  int titleSlots = MAX_TITLE_BOOKS;
+  uint8_t rowRadius = 0;
   char progressText[12]{};
   // Component styles and interaction tables stay off the render task's stack.
   freeink::ui::BookCardProps card;

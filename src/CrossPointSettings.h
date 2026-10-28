@@ -174,6 +174,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     PWR_BOOKMARK = 7,
     PWR_SYNC = 8,
     PWR_READER_MENU = 9,
+    PWR_HOME = 10,
     SHORT_PWRBTN_COUNT
   };
 
@@ -202,7 +203,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, COVER_GRID = 4 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, COVER_GRID = 4, TITLE_LIST = 5 };
 
   // Image rendering in EPUB reader. IMAGES_DISPLAY_BW lays images out like
   // IMAGES_DISPLAY but draws them as a B/W dither, so image pages skip the
@@ -353,6 +354,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t longPressMenuFunction = LP_MENU_DISABLED;
   // UI Theme
   uint8_t uiTheme = LYRA;
+  // Title List home: index into HOME_TITLE_LIST_COUNTS.
+  static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 4, 6, 10};
+  uint8_t homeTitleListBooks = 4;
+  int getHomeTitleListBookCount() const {
+    return HOME_TITLE_LIST_COUNTS[homeTitleListBooks < sizeof(HOME_TITLE_LIST_COUNTS) ? homeTitleListBooks : 4];
+  }
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Power button return from footnotes (1 = enabled, 0 = disabled)

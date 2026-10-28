@@ -46,6 +46,9 @@ void MappedInputManager::update(const bool deferHomeButtonAction) const {
       case CrossPointSettings::PWR_READER_MENU:
         homeAction = HomeButtonAction::ReaderMenu;
         break;
+      case CrossPointSettings::PWR_HOME:
+        homeAction = HomeButtonAction::Home;
+        break;
       default:
         break;
     }
@@ -362,7 +365,8 @@ bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); 
 bool MappedInputManager::wasReaderMenuSwipeUp() const { return gpio.hasHomeKey() && wasBottomEdgeUpSwipe(); }
 
 bool MappedInputManager::wasHomeGesture() const {
-  return gpio.hasHomeKey() ? homeAction == HomeButtonAction::Home : wasBottomEdgeUpSwipe();
+  if (homeAction == HomeButtonAction::Home) return true;
+  return !gpio.hasHomeKey() && wasBottomEdgeUpSwipe();
 }
 
 bool MappedInputManager::wasLightPanelGesture() const { return wasTopEdgeDownSwipe(); }

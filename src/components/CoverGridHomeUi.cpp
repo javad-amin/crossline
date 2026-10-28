@@ -10,6 +10,7 @@
 
 #include "MappedInputManager.h"
 #include "UITheme.h"
+#include "fontIds.h"
 #include "icons/blocks.h"
 #include "icons/book.h"
 #include "icons/folder.h"
@@ -25,16 +26,24 @@ constexpr fui::ActionId SELECT = 1;
 // inset so the cover columns land on the header chrome's inset line.
 constexpr int16_t COVER_CELL_INSET = 6;
 constexpr int COVER_ROW_EXTRA_HEIGHT = 8;
+constexpr int16_t TITLE_ROW_SIDE_INSET = 6;
+constexpr int TITLE_ROW_TEXT_PADDING = 14;
+constexpr int TITLE_ROW_VPADDING = 2;
+constexpr int TITLE_LIST_FONT_ID = UI_10_FONT_ID;
 }  // namespace
 
-CoverGridHomeUi::CoverGridHomeUi(GfxRenderer& renderer)
-    : UiAppHost(renderer), coverCache(renderer), renderer(renderer) {}
+CoverGridHomeUi::CoverGridHomeUi(GfxRenderer& renderer, const bool titlesOnly)
+    : UiAppHost(renderer),
+      coverCache(renderer),
+      renderer(renderer),
+      titlesOnly(titlesOnly),
+      titleSlots(std::clamp(SETTINGS.getHomeTitleListBookCount(), 1, MAX_TITLE_BOOKS)) {}
 
 void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bool continuing) {
   books = &recent;
   hasOpds = opds;
   hasContinueReading = continuing;
-  if (!recent.empty()) coverCache.begin();
+  if (!recent.empty() && !titlesOnly) coverCache.begin();
   resetUi();
   app.on(SELECT, &CoverGridHomeUi::onAction, this);
   app.setScreen(&CoverGridHomeUi::screenFn, this);
@@ -44,6 +53,7 @@ void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bo
 }
 
 void CoverGridHomeUi::refreshCoverPaths() {
+  if (titlesOnly) return;
   coverCache.invalidate();
   for (size_t i = 0; i < books->size() && i < coverPaths.size(); ++i) refreshCoverPath(i);
 }
@@ -132,6 +142,14 @@ void CoverGridHomeUi::draw(UiScreen& screen) {
   if (books->empty()) {
     drawTabs(screen, fitTabWidth(tabRect.inset(fui::Insets{0, COVER_CELL_INSET, 0, COVER_CELL_INSET})));
     drawEmpty(screen);
+    drawHeaderBand();
+    return;
+  }
+  if (titlesOnly) {
+    drawTitleList(screen);
+    tabRect.x = gridBounds.x + grid.cellInset.left;
+    tabRect.width = gridBounds.width - grid.cellInset.left - grid.cellInset.right;
+    drawTabs(screen, fitTabWidth(tabRect));
     drawHeaderBand();
     return;
   }
@@ -280,6 +298,81 @@ void CoverGridHomeUi::drawGrid(UiScreen& screen) {
     return static_cast<CoverGridHomeUi*>(user)->paintFramedCover(target, cover, index + 1);
   };
   fui::coverGrid(screen.frame(), rect, grid);
+}
+
+void CoverGridHomeUi::drawTitleList(UiScreen& screen) {
+  const auto& theme = screen.theme();
+  const fui::Rect body = screen.body();
+  const bool landscape = renderer.getScreenWidth() > renderer.getScreenHeight();
+  const int columns = landscape && titleSlots > 6 ? 2 : 1;
+  const int rows = (titleSlots + columns - 1) / columns;
+  constexpr int gap = 2;
+  grid.cellInset = fui::Insets{0, TITLE_ROW_SIDE_INSET, 0, TITLE_ROW_SIDE_INSET};
+  grid.gap = grid.rowGap = gap;
+  grid.rowHeight = static_cast<int16_t>(std::max(1, (body.height - (rows - 1) * gap) / rows));
+  const int cellWidth = (body.width - (columns - 1) * gap) / columns;
+  grid.coverSize.width = static_cast<int16_t>(std::max(1, cellWidth - 2 * TITLE_ROW_SIDE_INSET));
+  grid.coverSize.height = grid.rowHeight;
+  rowRadius = theme.listRowRadius;
+
+  grid.count = static_cast<uint16_t>(std::min<size_t>(books->size(), titleSlots));
+  // Latest book sits on the bottom row, so anchor a short list to the bottom.
+  const int emptyRows = rows - (grid.count + columns - 1) / columns;
+  gridBounds = body;
+  gridBounds.y = static_cast<int16_t>(gridBounds.y + emptyRows * (grid.rowHeight + gap));
+  gridBounds.height = static_cast<int16_t>(gridBounds.height - emptyRows * (grid.rowHeight + gap));
+
+  grid.columns = static_cast<uint8_t>(columns);
+  grid.columnLayout = fui::CoverGridColumnLayout::EqualWidth;
+  grid.action = SELECT;
+  grid.inputMask = fui::InputTouch;
+  // Selection is painted per row so it matches the settings list highlight.
+  grid.selectedIndex = -1;
+  grid.selectionIndicator = fui::CoverGridSelectionIndicator::Cell;
+  grid.cellStyles = fui::defaultListRowStyles();
+  grid.cellStyles.selected = grid.cellStyles.normal;
+  grid.cellStyles.active = grid.cellStyles.normal;
+  grid.labelHeight = 0;
+  grid.labelGap = 0;
+  grid.scrollIndicator = false;
+  grid.itemProviderUserData = this;
+  grid.itemProvider = [](uint16_t index, void* user) {
+    return fui::coverGridItem(nullptr, static_cast<CoverGridHomeUi*>(user)->grid.count - 1 - index);
+  };
+  grid.coverPainterUserData = this;
+  grid.coverPainter = [](fui::DrawTarget& target, fui::Rect row, const fui::CoverGridItem& item, uint16_t,
+                         void* user) {
+    return static_cast<CoverGridHomeUi*>(user)->paintTitleRow(target, row, item.actionValue);
+  };
+  fui::coverGrid(screen.frame(), gridBounds, grid);
+}
+
+bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, const size_t index) {
+  if (index >= books->size()) return false;
+  const auto& book = (*books)[index];
+  const char* title = book.title.c_str();
+  if (book.title.empty()) {
+    const size_t slash = book.path.find_last_of('/');
+    title = book.path.c_str() + (slash == std::string::npos ? 0 : slash + 1);
+  }
+  const bool latest = index == 0;
+  target.fill(rect,
+              static_cast<int>(index) == selected ? fui::Paint::dither(fui::Color::LightGray)
+                                                  : fui::Paint::solid(fui::Color::White),
+              rowRadius);
+  if (latest) target.stroke(rect, fui::Paint::solid(fui::Color::Black), 1, rowRadius);
+
+  const auto style = latest ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+  const int lineHeight = std::max(1, renderer.getLineHeight(TITLE_LIST_FONT_ID));
+  const int maxLines = std::clamp((rect.height - 2 * TITLE_ROW_VPADDING) / lineHeight, 1, 3);
+  const auto lines =
+      renderer.wrappedText(TITLE_LIST_FONT_ID, title, rect.width - 2 * TITLE_ROW_TEXT_PADDING, maxLines, style);
+  int y = rect.y + (rect.height - lineHeight * static_cast<int>(lines.size())) / 2;
+  for (const auto& line : lines) {
+    renderer.drawText(TITLE_LIST_FONT_ID, rect.x + TITLE_ROW_TEXT_PADDING, y, line.c_str(), true, style);
+    y += lineHeight;
+  }
+  return true;
 }
 
 void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
