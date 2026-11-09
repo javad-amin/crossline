@@ -37,6 +37,7 @@
 #include "QrDisplayActivity.h"
 #include "ReaderActivity.h"
 #include "ReaderFontSizes.h"
+#include "ReaderImageRefreshPolicy.h"
 #include "ReaderToolbarUi.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
@@ -1589,11 +1590,10 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool cleanImageBasePending = manualRefreshPending || pagesUntilFullRefresh <= 1;
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing;
   const bool needsAnyGrayscale = needsTextGrayscale || pageHasImages;
-  const bool absoluteImageGrayscale = pageHasImages && !gpio.deviceIsX3() &&
-                                      display.getController() == HalDisplay::Controller::UC8279 &&
-                                      renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Absolute).supported();
-  const auto grayscale = renderer.grayscaleCapabilities(absoluteImageGrayscale ? HalDisplay::GrayscaleMode::Absolute
-                                                                               : HalDisplay::GrayscaleMode::Overlay);
+  const auto grayscale = renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Overlay);
+  const bool uc8279ImageGrayscale = readerUsesOverlayGrayscaleForImage(
+      pageHasImages, gpio.deviceIsX3(), display.getController() == HalDisplay::Controller::UC8279,
+      grayscale.supported());
   const bool tiledGrayscale = needsAnyGrayscale && grayscale.stripUploads;
   // Paper Mono only (no other panel combines): defer the B/W base activation so
   // the gray planes join it in a single waveform. Displaying the base
@@ -1603,12 +1603,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       tiledGrayscale && !pageHasImages && grayscale.base == HalDisplay::GrayscaleBase::Combined;
   const bool overlapRefresh = tiledGrayscale && grayscale.asyncBase && !pageHasImages;
   auto renderGrayscalePass = [&]() {
-    if (absoluteImageGrayscale || needsTextGrayscale) {
+    if (needsTextGrayscale) {
       page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     } else {
       page->renderImages(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     }
-    if (absoluteImageGrayscale) renderStatusBar();
   };
 
   if (pageHasImagesNeedingDecode) {
@@ -1622,15 +1621,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   renderStatusBar();
   const auto tBwRender = millis();
 
-  if (absoluteImageGrayscale) {
-    const auto baseMode = cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
-    if (!renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Absolute, baseMode)) {
-      LOG_ERR("ERS", "Could not start absolute image page; displaying B/W");
+  if (uc8279ImageGrayscale) {
+    const auto imageRefresh = readerImageRefreshPolicy(manualRefreshPending, SETTINGS.getRefreshFrequency());
+    const auto baseMode = imageRefresh.useHalfRefresh ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+    if (!renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Overlay, baseMode)) {
+      LOG_ERR("ERS", "Could not start overlay image page; displaying B/W");
       ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
       return;
     }
-    LOG_DBG("ERS", "UC8279 image page: absolute quality waveform");
-    pagesUntilFullRefresh = 1;
+    LOG_DBG("ERS", "UC8279 image page: coverage-selected grayscale waveform");
+    pagesUntilFullRefresh = imageRefresh.pagesUntilFullRefresh;
   } else if (pageHasImages) {
     // Image pages use one base refresh before the grayscale pass. FAST leaves
     // the panel receptive to the gray waveform; pending cleanup still honors
@@ -1770,18 +1770,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     if (needsAnyGrayscale) {
       if (!renderer.storeBwBuffer()) {
         LOG_ERR("ERS", "Failed to store BW buffer for grayscale render; skipping grayscale this page");
-        if (absoluteImageGrayscale) renderer.setRenderMode(GfxRenderer::BW);
+        if (uc8279ImageGrayscale) renderer.setRenderMode(GfxRenderer::BW);
         return;
       }
       const auto tBwStore = millis();
 
-      renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
+      renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       renderGrayscalePass();
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
-      renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
+      renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       renderGrayscalePass();
       renderer.copyGrayscaleMsbBuffers();
