@@ -253,6 +253,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                            StrId::STR_HOME_BOOKS_7, StrId::STR_HOME_BOOKS_8, StrId::STR_HOME_BOOKS_9,
                            StrId::STR_HOME_BOOKS_10},
                           "homeTitleListBooks", StrId::STR_CAT_DISPLAY),
+        SettingInfo::Toggle(StrId::STR_RANDOM_HOME_BOOK, &CrossPointSettings::homeRandomBook, "homeRandomBook",
+                            StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_HOME_BACKGROUND, &CrossPointSettings::homeBackground,
                           {StrId::STR_STATE_OFF, StrId::STR_HOME_BACKGROUND_SLEEP_IMAGE}, "homeBackground",
                           StrId::STR_CAT_DISPLAY),

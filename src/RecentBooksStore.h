@@ -12,6 +12,7 @@ struct RecentBook {
   std::string coverBmpPath;
   bool pinned = false;
   bool latest = false;
+  bool random = false;
   int progressPercent = -1;
   bool progressLoaded = false;
 

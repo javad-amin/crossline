@@ -103,6 +103,87 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
   }
 }
 
+void HomeActivity::loadRandomHomeBook() {
+  if (!coverGridUi || !coverGridUi->isTitlesOnly() || SETTINGS.homeRandomBook == 0) return;
+
+  const size_t visibleSlots = static_cast<size_t>(coverGridUi->maxBooks());
+  const size_t visibleCount = std::min(recentBooks.size(), visibleSlots);
+  const size_t replacementIndex = visibleCount == visibleSlots ? visibleCount - 1 : recentBooks.size();
+  const bool replacingBook = replacementIndex < recentBooks.size();
+  if (replacingBook && recentBooks[replacementIndex].pinned) return;
+
+  if (!Storage.exists(library::libraryIndexPath())) {
+    LOG_DBG("HOME", "Random book unavailable: library index not built");
+    return;
+  }
+
+  struct LibraryReader {
+    library::LibraryIndexFile index;
+    library::ClixRecord record;
+  };
+  auto reader = makeUniqueNoThrow<LibraryReader>();
+  if (!reader) {
+    LOG_ERR("HOME", "OOM: random library index");
+    return;
+  }
+  auto& index = reader->index;
+  auto& record = reader->record;
+  if (!index.open(library::libraryIndexPath())) {
+    LOG_ERR("HOME", "Cannot open library index for random Home book");
+    return;
+  }
+
+  const uint16_t bookCount = index.bookCount();
+  if (bookCount == 0) return;
+
+  const uint16_t startRow = static_cast<uint16_t>(random(bookCount));
+  const size_t maxAttempts = std::min<size_t>(bookCount, CoverGridHomeUi::MAX_TITLE_BOOKS + 1);
+  for (size_t attempt = 0; attempt < maxAttempts; ++attempt) {
+    const uint16_t row = static_cast<uint16_t>((startRow + attempt) % bookCount);
+    const uint16_t ordinal = index.ordinalForRow(library::SortOrder::RecentDesc, row);
+    if (ordinal == 0xFFFF || !index.readRecord(ordinal, record)) {
+      if (index.ioFailed()) break;
+      continue;
+    }
+
+    RecentBook candidate;
+    if (!index.readPath(record, candidate.path)) {
+      if (index.ioFailed()) break;
+      continue;
+    }
+    if (RecentBooksStore::isMissing(candidate) || RECENT_BOOKS.isPinned(candidate.path)) continue;
+    bool alreadyDisplayed = false;
+    for (size_t i = 0; i < visibleCount; ++i) {
+      if (i != replacementIndex && recentBooks[i].path == candidate.path) {
+        alreadyDisplayed = true;
+        break;
+      }
+    }
+    if (alreadyDisplayed) continue;
+
+    if (!index.readTitle(record, candidate.title) && !index.readName(record, candidate.title)) continue;
+    if (index.ioFailed()) break;
+    index.readAuthor(record, candidate.author);
+    if (index.ioFailed()) break;
+
+    candidate.random = true;
+    candidate.progressPercent = loadBookProgress(candidate.path);
+    candidate.progressLoaded = true;
+    if (replacingBook) {
+      recentBooks[replacementIndex] = std::move(candidate);
+    } else {
+      recentBooks.push_back(std::move(candidate));
+    }
+    return;
+  }
+
+  if (index.ioFailed()) {
+    LOG_ERR("HOME", "Failed reading library index for random Home book");
+  } else {
+    LOG_DBG("HOME", "No distinct random Home book found");
+  }
+}
+
 void HomeActivity::fillCoverGridFromLibrary() {
   if (recentBooks.size() >= CoverGridHomeUi::MAX_BOOKS) return;
   // Keep the index and record together off the task stack; reuse for every row.
@@ -286,6 +367,7 @@ void HomeActivity::onEnter() {
   loadRecentBooks(coverGridUi ? coverGridUi->maxBooks() : metrics.homeRecentBooksCount);
   hasContinueReading = !recentBooks.empty();
   if (coverGridUi) {
+    loadRandomHomeBook();
     if (!coverGridUi->isTitlesOnly()) {
       fillCoverGridFromLibrary();
       resolveGridCoverPaths();
@@ -693,11 +775,13 @@ void HomeActivity::promptPinBook(const int index) {
                                          : book.title.c_str();
   const bool supportsChapterSelection =
       FsHelpers::hasEpubExtension(book.path) || FsHelpers::hasXtcExtension(book.path);
-  const int hideOption = supportsChapterSelection ? 2 : 1;
-  const char* options[] = {I18N.get(book.pinned ? StrId::STR_UNPIN_BOOK : StrId::STR_PIN_BOOK),
-                           supportsChapterSelection ? tr(STR_OPEN_CHAPTER) : tr(STR_HIDE_FROM_HOME),
-                           tr(STR_HIDE_FROM_HOME)};
-  bookOptionsPopup.show(tr(STR_BOOK_OPTIONS), title, options, supportsChapterSelection ? 3 : 2, 0,
+  const bool canHide = !book.random;
+  const int hideOption = canHide ? (supportsChapterSelection ? 2 : 1) : -1;
+  const char* options[3] = {I18N.get(book.pinned ? StrId::STR_UNPIN_BOOK : StrId::STR_PIN_BOOK)};
+  int optionCount = 1;
+  if (supportsChapterSelection) options[optionCount++] = tr(STR_OPEN_CHAPTER);
+  if (canHide) options[optionCount++] = tr(STR_HIDE_FROM_HOME);
+  bookOptionsPopup.show(tr(STR_BOOK_OPTIONS), title, options, optionCount, 0,
                         [this, book, index, supportsChapterSelection, hideOption](const int option) {
     if (supportsChapterSelection && option == 1) {
       openChapterSelector(book);
@@ -716,6 +800,7 @@ void HomeActivity::promptPinBook(const int index) {
       coverGridUi->closeRouting();
       loadRecentBooks(coverGridUi->maxBooks());
       hasContinueReading = !recentBooks.empty();
+      loadRandomHomeBook();
       coverGridUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
       selectorIndex = std::min(index, std::max(0, static_cast<int>(recentBooks.size()) - 1));
       requestUpdate();
@@ -740,6 +825,7 @@ void HomeActivity::promptPinBook(const int index) {
     coverGridUi->closeRouting();
     loadRecentBooks(coverGridUi->maxBooks());
     hasContinueReading = !recentBooks.empty();
+    loadRandomHomeBook();
     coverGridUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
     const auto selected = std::find_if(recentBooks.begin(), recentBooks.end(),
                                        [&](const RecentBook& candidate) { return candidate.path == book.path; });

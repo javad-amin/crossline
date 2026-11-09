@@ -337,6 +337,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
                                       ? homeTitleListBooks
                                       : HOME_TITLE_LIST_DEFAULT_INDEX];
   }
+  // Title List home: replace the top row with a random library book.
+  uint8_t homeRandomBook = 0;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Power button return from footnotes (1 = enabled, 0 = disabled)
