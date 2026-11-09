@@ -39,6 +39,42 @@ int HomeActivity::getMenuItemCount() const {
 void HomeActivity::loadRecentBooks(int maxBooks) {
   recentBooks.clear();
   const auto& books = RECENT_BOOKS.getBooks();
+  if (coverGridUi && coverGridUi->isTitlesOnly()) {
+    if (RECENT_BOOKS.pruneMissing() && !RECENT_BOOKS.saveToFile()) {
+      LOG_ERR("HOME", "Failed to save pruned recent and pinned books");
+    }
+
+    const auto& pinnedBooks = RECENT_BOOKS.getPinnedBooks();
+    const int displayCount =
+        std::clamp(std::max(maxBooks, static_cast<int>(pinnedBooks.size())), 1, CoverGridHomeUi::MAX_TITLE_BOOKS);
+    const int recentCount = std::max(0, displayCount - static_cast<int>(pinnedBooks.size()));
+    recentBooks.reserve(displayCount);
+
+    std::string latestPath;
+    for (const RecentBook& book : books) {
+      if (!RecentBooksStore::isMissing(book)) {
+        latestPath = book.path;
+        break;
+      }
+    }
+
+    for (const RecentBook& book : pinnedBooks) {
+      if (static_cast<int>(recentBooks.size()) >= displayCount) break;
+      recentBooks.push_back(book);
+      recentBooks.back().pinned = true;
+      recentBooks.back().latest = book.path == latestPath;
+    }
+    int addedRecentBooks = 0;
+    for (const RecentBook& book : books) {
+      if (addedRecentBooks >= recentCount) break;
+      if (RECENT_BOOKS.isPinned(book.path) || RecentBooksStore::isMissing(book)) continue;
+      recentBooks.push_back(book);
+      recentBooks.back().latest = book.path == latestPath;
+      ++addedRecentBooks;
+    }
+    return;
+  }
+
   recentBooks.reserve(coverGridUi ? maxBooks : std::min(static_cast<int>(books.size()), maxBooks));
 
   for (const RecentBook& book : books) {
@@ -299,6 +335,8 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 void HomeActivity::loop() {
+  if (bookOptionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+
   const int menuCount = getMenuItemCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
@@ -358,8 +396,13 @@ void HomeActivity::loop() {
   // Back is otherwise unused on the home menu: open the most recently read
   // book directly (recentBooks is most-recent-first and already pruned of
   // files missing from the SD card).
+  const auto latestBook = std::find_if(recentBooks.begin(), recentBooks.end(),
+                                       [](const RecentBook& book) { return book.latest; });
+  const int latestIndex = latestBook != recentBooks.end()
+                              ? static_cast<int>(std::distance(recentBooks.begin(), latestBook))
+                              : 0;
   if (mappedInput.wasReleased(MappedInputManager::Button::Back) && hasContinueReading && !recentBooks.empty()) {
-    onSelectBook(recentBooks[0].path);
+    onSelectBook(recentBooks[latestIndex].path);
     return;
   }
 
@@ -367,6 +410,11 @@ void HomeActivity::loop() {
     const int touched = coverGridUi->selectedAction(mappedInput);
     if (touched >= 0 && touched < menuCount) {
       selectorIndex = touched;
+      if (coverGridUi->isTitlesOnly() && coverGridUi->wasLongPress()) {
+        promptPinBook(touched);
+        requestUpdate();
+        return;
+      }
       activateSelection();
       return;
     }
@@ -454,6 +502,8 @@ void HomeActivity::loop() {
 }
 
 void HomeActivity::render(RenderLock&&) {
+  if (bookOptionsPopup.processRender(renderer, mappedInput)) return;
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
@@ -554,6 +604,64 @@ void HomeActivity::render(RenderLock&&) {
 }
 
 void HomeActivity::onSelectBook(const std::string& path) { Activity::onSelectBook(path); }
+
+void HomeActivity::promptPinBook(const int index) {
+  if (!coverGridUi || !coverGridUi->isTitlesOnly() || index < 0 ||
+      static_cast<size_t>(index) >= recentBooks.size()) {
+    return;
+  }
+  const RecentBook book = recentBooks[index];
+  const size_t slash = book.path.find_last_of('/');
+  const char* title = book.title.empty() ? book.path.c_str() + (slash == std::string::npos ? 0 : slash + 1)
+                                         : book.title.c_str();
+  const char* options[] = {I18N.get(book.pinned ? StrId::STR_UNPIN_BOOK : StrId::STR_PIN_BOOK),
+                           tr(STR_HIDE_FROM_HOME)};
+  bookOptionsPopup.show(tr(STR_BOOK_OPTIONS), title, options, 2, 0, [this, book, index](const int option) {
+    if (option == 1) {
+      if (!RECENT_BOOKS.removeFromHome(book)) {
+        const std::vector<std::string> errorOptions{tr(STR_OK_BUTTON)};
+        bookOptionsPopup.show(StrId::STR_HOME_REMOVE_FAILED, errorOptions, 0, {});
+        requestUpdate();
+        return;
+      }
+
+      RenderLock lock(*this);
+      coverGridUi->closeRouting();
+      loadRecentBooks(coverGridUi->maxBooks());
+      hasContinueReading = !recentBooks.empty();
+      coverGridUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
+      selectorIndex = std::min(index, std::max(0, static_cast<int>(recentBooks.size()) - 1));
+      requestUpdate();
+      return;
+    }
+
+    const bool pinning = !book.pinned;
+    if (pinning && RECENT_BOOKS.getPinnedBooks().size() >= RecentBooksStore::MAX_PINNED_BOOKS) {
+      const std::vector<std::string> errorOptions{tr(STR_OK_BUTTON)};
+      bookOptionsPopup.show(StrId::STR_PIN_LIMIT_REACHED, errorOptions, 0, {});
+      requestUpdate();
+      return;
+    }
+    if (!RECENT_BOOKS.setPinned(book, pinning)) {
+      const std::vector<std::string> errorOptions{tr(STR_OK_BUTTON)};
+      bookOptionsPopup.show(StrId::STR_PIN_SAVE_FAILED, errorOptions, 0, {});
+      requestUpdate();
+      return;
+    }
+
+    RenderLock lock(*this);
+    coverGridUi->closeRouting();
+    loadRecentBooks(coverGridUi->maxBooks());
+    hasContinueReading = !recentBooks.empty();
+    coverGridUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
+    const auto selected = std::find_if(recentBooks.begin(), recentBooks.end(),
+                                       [&](const RecentBook& candidate) { return candidate.path == book.path; });
+    selectorIndex = selected != recentBooks.end()
+                        ? static_cast<int>(std::distance(recentBooks.begin(), selected))
+                        : 0;
+    requestUpdate();
+  });
+}
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 

@@ -8,16 +8,20 @@
 
 #include <algorithm>
 #include <iterator>
+#include <utility>
 
 void RecentBooksStore::toJson(JsonDocument& doc) const {
-  JsonArray arr = doc["books"].to<JsonArray>();
-  for (const auto& book : recentBooks) {
-    JsonObject obj = arr.add<JsonObject>();
-    obj["path"] = book.path;
-    obj["title"] = book.title;
-    obj["author"] = book.author;
-    obj["coverBmpPath"] = book.coverBmpPath;
-  }
+  auto writeBooks = [](JsonArray arr, const std::vector<RecentBook>& books) {
+    for (const auto& book : books) {
+      JsonObject obj = arr.add<JsonObject>();
+      obj["path"] = book.path;
+      obj["title"] = book.title;
+      obj["author"] = book.author;
+      obj["coverBmpPath"] = book.coverBmpPath;
+    }
+  };
+  writeBooks(doc["books"].to<JsonArray>(), recentBooks);
+  writeBooks(doc["pinnedBooks"].to<JsonArray>(), pinnedBooks);
 }
 
 bool RecentBooksStore::fromJson(JsonVariantConst doc) {
@@ -36,8 +40,100 @@ bool RecentBooksStore::fromJson(JsonVariantConst doc) {
     recentBooks.push_back(book);
   }
 
+  pinnedBooks.clear();
+  JsonArrayConst pinnedArr = doc["pinnedBooks"].as<JsonArrayConst>();
+  pinnedBooks.reserve(MAX_PINNED_BOOKS);
+  for (JsonObjectConst obj : pinnedArr) {
+    if (pinnedBooks.size() >= MAX_PINNED_BOOKS) break;
+    RecentBook book;
+    book.path = obj["path"] | "";
+    if (book.path.empty() || isPinned(book.path)) continue;
+    book.title = obj["title"] | "";
+    book.author = obj["author"] | "";
+    book.coverBmpPath = obj["coverBmpPath"] | "";
+    pinnedBooks.push_back(std::move(book));
+  }
+
   LOG_DBG("RBS", "Recent books loaded from file (%d entries)", getCount());
   return true;
+}
+
+bool RecentBooksStore::setPinned(const RecentBook& book, const bool pinned) {
+  const auto it = std::find_if(pinnedBooks.begin(), pinnedBooks.end(),
+                               [&](const RecentBook& candidate) { return candidate.path == book.path; });
+  if (pinned) {
+    if (it != pinnedBooks.end()) {
+      if (it->title == book.title && it->author == book.author && it->coverBmpPath == book.coverBmpPath) return true;
+      const RecentBook previous = *it;
+      it->title = book.title;
+      it->author = book.author;
+      it->coverBmpPath = book.coverBmpPath;
+      if (saveToFile()) return true;
+      *it = previous;
+      return false;
+    }
+    if (pinnedBooks.size() >= MAX_PINNED_BOOKS) {
+      LOG_ERR("RBS", "Cannot pin more than %d books", MAX_PINNED_BOOKS);
+      return false;
+    }
+    pinnedBooks.reserve(MAX_PINNED_BOOKS);
+    pinnedBooks.push_back(book);
+    if (saveToFile()) return true;
+    pinnedBooks.pop_back();
+    return false;
+  }
+
+  if (it == pinnedBooks.end()) return true;
+  const size_t index = static_cast<size_t>(std::distance(pinnedBooks.begin(), it));
+  RecentBook previous = *it;
+  pinnedBooks.erase(it);
+  if (saveToFile()) return true;
+  pinnedBooks.insert(pinnedBooks.begin() + index, std::move(previous));
+  return false;
+}
+
+bool RecentBooksStore::isPinned(const std::string& path) const {
+  return std::any_of(pinnedBooks.begin(), pinnedBooks.end(),
+                     [&](const RecentBook& book) { return book.path == path; });
+}
+
+bool RecentBooksStore::removeFromHome(const RecentBook& book) {
+  const auto recentIt = std::find_if(recentBooks.begin(), recentBooks.end(),
+                                     [&](const RecentBook& recent) { return recent.path == book.path; });
+  const auto pinnedIt = std::find_if(pinnedBooks.begin(), pinnedBooks.end(),
+                                     [&](const RecentBook& pinned) { return pinned.path == book.path; });
+  if (recentIt == recentBooks.end() && pinnedIt == pinnedBooks.end()) return true;
+
+  const bool wasRecent = recentIt != recentBooks.end();
+  const bool wasPinned = pinnedIt != pinnedBooks.end();
+  const size_t recentIndex = wasRecent ? static_cast<size_t>(std::distance(recentBooks.begin(), recentIt)) : 0;
+  const size_t pinnedIndex = wasPinned ? static_cast<size_t>(std::distance(pinnedBooks.begin(), pinnedIt)) : 0;
+  if (wasRecent) recentBooks.erase(recentIt);
+  if (wasPinned) pinnedBooks.erase(pinnedIt);
+  if (saveToFile()) return true;
+
+  if (wasRecent) recentBooks.insert(recentBooks.begin() + recentIndex, book);
+  if (wasPinned) {
+    RecentBook pinnedBook = book;
+    pinnedBook.pinned = true;
+    pinnedBooks.insert(pinnedBooks.begin() + pinnedIndex, std::move(pinnedBook));
+  }
+  LOG_ERR("RBS", "Failed to persist home removal: %s", book.path.c_str());
+  return false;
+}
+
+void RecentBooksStore::removeDeletedBook(const std::string& path) {
+  const size_t recentCount = recentBooks.size();
+  const size_t pinnedCount = pinnedBooks.size();
+  recentBooks.erase(std::remove_if(recentBooks.begin(), recentBooks.end(),
+                                   [&](const RecentBook& book) { return book.path == path; }),
+                    recentBooks.end());
+  pinnedBooks.erase(std::remove_if(pinnedBooks.begin(), pinnedBooks.end(),
+                                   [&](const RecentBook& book) { return book.path == path; }),
+                    pinnedBooks.end());
+  if ((recentBooks.size() != recentCount || pinnedBooks.size() != pinnedCount) && !saveToFile()) {
+    LOG_ERR("RBS", "Failed to persist deleted book removal: %s", path.c_str());
+  }
 }
 
 void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
@@ -60,6 +156,14 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
     recentBooks.resize(MAX_RECENT_BOOKS);
   }
 
+  const auto pinned = std::find_if(pinnedBooks.begin(), pinnedBooks.end(),
+                                   [&](const RecentBook& book) { return book.path == path; });
+  if (pinned != pinnedBooks.end()) {
+    pinned->title = title;
+    pinned->author = author;
+    pinned->coverBmpPath = coverBmpPath;
+  }
+
   saveToFile();
 }
 
@@ -67,11 +171,20 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
                                   const std::string& coverBmpPath) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
-  if (it != recentBooks.end()) {
-    RecentBook& book = *it;
-    book.title = title;
-    book.author = author;
-    book.coverBmpPath = coverBmpPath;
+  const auto pinned =
+      std::find_if(pinnedBooks.begin(), pinnedBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  if (it != recentBooks.end() || pinned != pinnedBooks.end()) {
+    if (it != recentBooks.end()) {
+      RecentBook& book = *it;
+      book.title = title;
+      book.author = author;
+      book.coverBmpPath = coverBmpPath;
+    }
+    if (pinned != pinnedBooks.end()) {
+      pinned->title = title;
+      pinned->author = author;
+      pinned->coverBmpPath = coverBmpPath;
+    }
     saveToFile();
   }
 }
@@ -91,24 +204,31 @@ bool RecentBooksStore::removeByPath(const std::string& path) {
 
 void RecentBooksStore::updatePath(const std::string& oldPath, const std::string& newPath,
                                   const std::string& oldCachePath, const std::string& newCachePath) {
-  auto it = std::find_if(recentBooks.begin(), recentBooks.end(),
-                         [&](const RecentBook& book) { return book.path == oldPath; });
-  if (it == recentBooks.end()) {
-    return;
-  }
-  it->path = newPath;
-  if (!oldCachePath.empty() && !it->coverBmpPath.empty() && it->coverBmpPath.rfind(oldCachePath, 0) == 0) {
-    it->coverBmpPath = newCachePath + it->coverBmpPath.substr(oldCachePath.size());
-  }
+  bool changed = false;
+  auto update = [&](std::vector<RecentBook>& books) {
+    const auto it =
+        std::find_if(books.begin(), books.end(), [&](const RecentBook& book) { return book.path == oldPath; });
+    if (it == books.end()) return;
+    it->path = newPath;
+    if (!oldCachePath.empty() && !it->coverBmpPath.empty() && it->coverBmpPath.rfind(oldCachePath, 0) == 0) {
+      it->coverBmpPath = newCachePath + it->coverBmpPath.substr(oldCachePath.size());
+    }
+    changed = true;
+  };
+  update(recentBooks);
+  update(pinnedBooks);
+  if (!changed) return;
   saveToFile();
 }
 
 bool RecentBooksStore::isMissing(const RecentBook& book) { return !Storage.exists(book.path.c_str()); }
 
 bool RecentBooksStore::pruneMissing() {
-  const size_t before = recentBooks.size();
+  const size_t recentCount = recentBooks.size();
+  const size_t pinnedCount = pinnedBooks.size();
   recentBooks.erase(std::remove_if(recentBooks.begin(), recentBooks.end(), &isMissing), recentBooks.end());
-  return recentBooks.size() != before;
+  pinnedBooks.erase(std::remove_if(pinnedBooks.begin(), pinnedBooks.end(), &isMissing), pinnedBooks.end());
+  return recentBooks.size() != recentCount || pinnedBooks.size() != pinnedCount;
 }
 
 RecentBook RecentBooksStore::getDataFromBook(std::string path) const {

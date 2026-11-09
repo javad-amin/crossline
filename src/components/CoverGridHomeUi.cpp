@@ -45,13 +45,20 @@ void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bo
   books = &recent;
   hasOpds = opds;
   hasContinueReading = continuing;
+  if (titlesOnly) {
+    titleSlots = maxBooks();
+  }
   if (!recent.empty() && !titlesOnly) coverCache.begin();
   if (titlesOnly) background = home_background::load(renderer);
   resetUi();
   app.on(SELECT, &CoverGridHomeUi::onAction, this);
   app.setScreen(&CoverGridHomeUi::screenFn, this);
   refreshCoverPaths();
-  progress = hasContinueReading && !books->empty() ? loadBookProgress(books->front().path) : -1;
+  const auto latest = std::find_if(books->begin(), books->end(), [](const RecentBook& book) { return book.latest; });
+  progress = -1;
+  if (hasContinueReading && !books->empty()) {
+    progress = loadBookProgress(latest != books->end() ? latest->path : books->front().path);
+  }
   if (progress >= 0) snprintf(progressText, sizeof(progressText), "%d%%", progress);
 }
 
@@ -93,7 +100,9 @@ void CoverGridHomeUi::onAction(const fui::ActionEvent& event, void* user) {
 
 int CoverGridHomeUi::selectedAction(const MappedInputManager& input) {
   pending = -1;
-  const auto touch = routeTouch(input);
+  lastLongPress = false;
+  const auto touch = routeTouch(input, titlesOnly);
+  if (touch.event) lastLongPress = touch.event.longPress;
   return touch.snap.touchReleased ? pending : -1;
 }
 
@@ -314,7 +323,7 @@ void CoverGridHomeUi::drawTitleList(UiScreen& screen) {
   grid.columns = static_cast<uint8_t>(columns);
   grid.columnLayout = fui::CoverGridColumnLayout::EqualWidth;
   grid.action = SELECT;
-  grid.inputMask = fui::InputTouch;
+  grid.inputMask = static_cast<uint16_t>(fui::InputTouch | fui::InputLongPress);
   // Selection is painted per row so it matches the settings list highlight.
   grid.selectedIndex = -1;
   grid.selectionIndicator = fui::CoverGridSelectionIndicator::Cell;
@@ -345,15 +354,18 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
     const size_t slash = book.path.find_last_of('/');
     title = book.path.c_str() + (slash == std::string::npos ? 0 : slash + 1);
   }
-  const bool latest = index == 0;
+  const bool latest = book.latest || (!titlesOnly && index == 0);
   const bool isSelected = static_cast<int>(index) == selected;
   const auto ink = fui::Paint::solid(fui::Color::Black);
   const auto paper = fui::Paint::solid(fui::Color::White);
   const auto style = latest ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
   const int lineHeight = std::max(1, renderer.getLineHeight(TITLE_LIST_FONT_ID));
   const int maxLines = std::clamp((rect.height - 2 * TITLE_ROW_VPADDING) / lineHeight, 1, 3);
+  constexpr int PIN_ICON_SIZE = 14;
+  const int textRightPadding = TITLE_ROW_TEXT_PADDING + (book.pinned ? PIN_ICON_SIZE + 6 : 0);
   const auto lines =
-      renderer.wrappedText(TITLE_LIST_FONT_ID, title, rect.width - 2 * TITLE_ROW_TEXT_PADDING, maxLines, style);
+      renderer.wrappedText(TITLE_LIST_FONT_ID, title, rect.width - TITLE_ROW_TEXT_PADDING - textRightPadding, maxLines,
+                           style);
   const int textHeight = lineHeight * static_cast<int>(lines.size());
 
   if (!background) {
@@ -373,6 +385,16 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
   for (const auto& line : lines) {
     renderer.drawText(TITLE_LIST_FONT_ID, rect.x + TITLE_ROW_TEXT_PADDING, y, line.c_str(), true, style);
     y += lineHeight;
+  }
+  if (book.pinned) {
+    const int16_t iconX = static_cast<int16_t>(rect.right() - TITLE_ROW_TEXT_PADDING - PIN_ICON_SIZE);
+    const int16_t iconY = static_cast<int16_t>(rect.y + (rect.height - PIN_ICON_SIZE) / 2);
+    const auto pinInk = fui::Paint::solid(fui::Color::Black);
+    target.fill(fui::Rect{static_cast<int16_t>(iconX + 3), iconY, 8, 3}, pinInk, 1);
+    target.line(fui::Point{static_cast<int16_t>(iconX + 4), static_cast<int16_t>(iconY + 3)},
+                fui::Point{static_cast<int16_t>(iconX + 10), static_cast<int16_t>(iconY + 9)}, 2, pinInk);
+    target.line(fui::Point{static_cast<int16_t>(iconX + 10), static_cast<int16_t>(iconY + 9)},
+                fui::Point{static_cast<int16_t>(iconX + 4), static_cast<int16_t>(iconY + 14)}, 2, pinInk);
   }
   return true;
 }

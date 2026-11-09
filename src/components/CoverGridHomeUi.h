@@ -2,6 +2,7 @@
 
 #include <HalMemory.h>
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -23,11 +24,16 @@ class CoverGridHomeUi final : public UiAppHost {
   static_assert(MAX_BOOKS <= HomeCoverCache::MAX_COVERS);
   CoverGridHomeUi(GfxRenderer& renderer, bool titlesOnly);
   bool isTitlesOnly() const { return titlesOnly; }
-  int maxBooks() const { return titlesOnly ? titleSlots : MAX_BOOKS; }
+  int maxBooks() const {
+    return titlesOnly ? std::clamp(std::max(titleSlots, static_cast<int>(RECENT_BOOKS.getPinnedBooks().size())), 1,
+                                   MAX_TITLE_BOOKS)
+                      : MAX_BOOKS;
+  }
   void begin(const std::vector<RecentBook>& books, bool hasOpds, bool hasContinueReading);
   void refreshCoverPaths();
   void setSelection(int selection) { selected = selection; }
   int selectedAction(const MappedInputManager& input);
+  bool wasLongPress() const { return lastLongPress; }
   // Exact generation height, shared by every slot and recorded during draw.
   // Thumbs must be generated at the drawn size: rescaling a dithered 1-bit
   // image aliases badly.
@@ -58,6 +64,7 @@ class CoverGridHomeUi final : public UiAppHost {
   bool thumbHeightChanged = false;
   int selected = 0;
   int pending = -1;
+  bool lastLongPress = false;
   int progress = -1;
   bool hasOpds = false;
   bool hasContinueReading = false;
