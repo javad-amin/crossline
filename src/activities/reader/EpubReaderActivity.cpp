@@ -240,6 +240,20 @@ bool EpubReaderActivity::loadBook() {
     }
   }
 
+  if (initialChapter) {
+    if (initialChapter->spineIndex >= 0 && initialChapter->spineIndex < epub->getSpineItemsCount()) {
+      currentSpineIndex = initialChapter->spineIndex;
+      pendingAnchor = std::move(initialChapter->anchor);
+      nextPageNumber = 0;
+      cachedSpineIndex = currentSpineIndex;
+      cachedChapterTotalPageCount = 0;
+      cachedVisibleTextOffset.reset();
+    } else {
+      LOG_ERR("ERS", "Ignoring invalid initial chapter index: %d", initialChapter->spineIndex);
+    }
+    initialChapter.reset();
+  }
+
   loadCachedBookmarks();
   return true;
 }

@@ -12,6 +12,8 @@ struct RecentBook {
   std::string coverBmpPath;
   bool pinned = false;
   bool latest = false;
+  int progressPercent = -1;
+  bool progressLoaded = false;
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -38,6 +40,7 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
   bool setPinned(const RecentBook& book, bool pinned);
   bool isPinned(const std::string& path) const;
   const std::vector<RecentBook>& getPinnedBooks() const { return pinnedBooks; }
+  void cacheProgress(const std::string& path, int progressPercent);
   bool removeFromHome(const RecentBook& book);
   void removeDeletedBook(const std::string& path);
 

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -14,6 +16,8 @@ class ReaderActivity : public Activity {
   std::string bookPath;
   int pagesUntilFullRefresh = 0;
   bool forcedRefreshPending = false;
+  std::optional<ChapterResult> initialChapter;
+  std::optional<uint32_t> initialPage;
 
   std::unique_ptr<EndOfBookOptions> endOfBookOptions;
   std::atomic<bool> endOfBookOptionsReady{false};
@@ -55,7 +59,9 @@ class ReaderActivity : public Activity {
   ~ReaderActivity() override = default;
 
   static std::unique_ptr<ReaderActivity> create(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                                std::string path, bool allowFastInitialRefresh);
+                                                std::string path, bool allowFastInitialRefresh,
+                                                std::optional<ChapterResult> initialChapter = std::nullopt,
+                                                std::optional<uint32_t> initialPage = std::nullopt);
 
   void onEnter() override;
   void onExit() override;

@@ -57,7 +57,8 @@ void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bo
   const auto latest = std::find_if(books->begin(), books->end(), [](const RecentBook& book) { return book.latest; });
   progress = -1;
   if (hasContinueReading && !books->empty()) {
-    progress = loadBookProgress(latest != books->end() ? latest->path : books->front().path);
+    const RecentBook& latestBook = latest != books->end() ? *latest : books->front();
+    progress = latestBook.progressLoaded ? latestBook.progressPercent : loadBookProgress(latestBook.path);
   }
   if (progress >= 0) snprintf(progressText, sizeof(progressText), "%d%%", progress);
 }
@@ -362,7 +363,15 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
   const int lineHeight = std::max(1, renderer.getLineHeight(TITLE_LIST_FONT_ID));
   const int maxLines = std::clamp((rect.height - 2 * TITLE_ROW_VPADDING) / lineHeight, 1, 3);
   constexpr int PIN_ICON_SIZE = 14;
-  const int textRightPadding = TITLE_ROW_TEXT_PADDING + (book.pinned ? PIN_ICON_SIZE + 6 : 0);
+  char progressText[5]{};
+  int progressWidth = 0;
+  if (book.progressPercent >= 0) {
+    snprintf(progressText, sizeof(progressText), "%d%%", book.progressPercent);
+    progressWidth = renderer.getTextWidth(SMALL_FONT_ID, progressText);
+  }
+  const int progressPadding = progressWidth > 0 ? progressWidth + 8 : 0;
+  const int pinPadding = book.pinned ? PIN_ICON_SIZE + 6 : 0;
+  const int textRightPadding = TITLE_ROW_TEXT_PADDING + progressPadding + pinPadding;
   const auto lines =
       renderer.wrappedText(TITLE_LIST_FONT_ID, title, rect.width - TITLE_ROW_TEXT_PADDING - textRightPadding, maxLines,
                            style);
@@ -385,6 +394,12 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
   for (const auto& line : lines) {
     renderer.drawText(TITLE_LIST_FONT_ID, rect.x + TITLE_ROW_TEXT_PADDING, y, line.c_str(), true, style);
     y += lineHeight;
+  }
+  if (progressWidth > 0) {
+    const int iconSpace = book.pinned ? PIN_ICON_SIZE + 6 : 0;
+    const int progressX = rect.right() - TITLE_ROW_TEXT_PADDING - iconSpace - progressWidth;
+    const int progressY = rect.y + (rect.height - renderer.getLineHeight(SMALL_FONT_ID)) / 2;
+    renderer.drawText(SMALL_FONT_ID, progressX, progressY, progressText);
   }
   if (book.pinned) {
     const int16_t iconX = static_cast<int16_t>(rect.right() - TITLE_ROW_TEXT_PADDING - PIN_ICON_SIZE);

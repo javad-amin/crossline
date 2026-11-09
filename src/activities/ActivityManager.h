@@ -5,6 +5,7 @@
 #include <freertos/task.h>
 
 #include <atomic>
+#include <cstdint>
 #include <cassert>
 #include <memory>
 #include <string>
@@ -16,6 +17,7 @@
 
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
+struct ChapterResult;
 
 enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, SETTINGS_MENU };
 
@@ -91,6 +93,8 @@ class ActivityManager {
   void goToLibrary();
   void goToBrowser();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
+  void goToReaderAtChapter(std::string path, ChapterResult chapter);
+  void goToReaderAtPage(std::string path, uint32_t page);
   // Immediate feedback before a slow screen change; call without holding RenderLock.
   void showLoadingPopup();
   void goToSleep(bool fromTimeout = false);

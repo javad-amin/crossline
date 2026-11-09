@@ -29,6 +29,14 @@ bool XtcReaderActivity::loadBook() {
   xtc = std::move(loadedXtc);
   xtc->setupCacheDir();
   loadProgress();
+  if (initialPage) {
+    if (*initialPage < xtc->getPageCount()) {
+      currentPage = *initialPage;
+    } else {
+      LOG_ERR("XTR", "Ignoring invalid initial page: %u", static_cast<unsigned>(*initialPage));
+    }
+    initialPage.reset();
+  }
   return true;
 }
 

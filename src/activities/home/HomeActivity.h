@@ -78,6 +78,7 @@ class HomeActivity final : public Activity {
   void resolveGridCoverPaths();
   void loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
   void promptPinBook(int index);
+  void openChapterSelector(const RecentBook& book);
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,

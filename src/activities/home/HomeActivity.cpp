@@ -22,8 +22,11 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "activities/reader/EpubReaderChapterSelectionActivity.h"
+#include "activities/reader/XtcReaderChapterSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BookProgress.h"
 
 int HomeActivity::getMenuItemCount() const {
   int count = 4;  // File Browser, Library, File transfer, Settings
@@ -49,6 +52,12 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
         std::clamp(std::max(maxBooks, static_cast<int>(pinnedBooks.size())), 1, CoverGridHomeUi::MAX_TITLE_BOOKS);
     const int recentCount = std::max(0, displayCount - static_cast<int>(pinnedBooks.size()));
     recentBooks.reserve(displayCount);
+    const auto loadProgress = [](RecentBook& book) {
+      if (book.progressLoaded) return;
+      book.progressPercent = loadBookProgress(book.path);
+      book.progressLoaded = true;
+      RECENT_BOOKS.cacheProgress(book.path, book.progressPercent);
+    };
 
     std::string latestPath;
     for (const RecentBook& book : books) {
@@ -63,6 +72,7 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
       recentBooks.push_back(book);
       recentBooks.back().pinned = true;
       recentBooks.back().latest = book.path == latestPath;
+      loadProgress(recentBooks.back());
     }
     int addedRecentBooks = 0;
     for (const RecentBook& book : books) {
@@ -70,6 +80,7 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
       if (RECENT_BOOKS.isPinned(book.path) || RecentBooksStore::isMissing(book)) continue;
       recentBooks.push_back(book);
       recentBooks.back().latest = book.path == latestPath;
+      loadProgress(recentBooks.back());
       ++addedRecentBooks;
     }
     return;
@@ -605,6 +616,72 @@ void HomeActivity::render(RenderLock&&) {
 
 void HomeActivity::onSelectBook(const std::string& path) { Activity::onSelectBook(path); }
 
+void HomeActivity::openChapterSelector(const RecentBook& book) {
+  const auto showUnavailable = [this] {
+    const std::vector<std::string> options{tr(STR_OK_BUTTON)};
+    bookOptionsPopup.show(StrId::STR_CHAPTERS_UNAVAILABLE, options, 0, {});
+    requestUpdate();
+  };
+
+  if (FsHelpers::hasEpubExtension(book.path)) {
+    auto epub = makeUniqueNoThrow<Epub>(book.path, "/.crosspoint");
+    if (!epub) {
+      LOG_ERR("HOME", "OOM: chapter selection EPUB");
+      showUnavailable();
+      return;
+    }
+    if (!epub->load(false, true) || epub->getTocItemsCount() <= 0) {
+      LOG_DBG("HOME", "Chapter metadata unavailable: %s", book.path.c_str());
+      showUnavailable();
+      return;
+    }
+
+    std::shared_ptr<Epub> sharedEpub;
+    sharedEpub = std::move(epub);
+    auto selector = makeUniqueNoThrow<EpubReaderChapterSelectionActivity>(renderer, mappedInput, sharedEpub, 0);
+    if (!selector) {
+      LOG_ERR("HOME", "OOM: EPUB chapter selector");
+      showUnavailable();
+      return;
+    }
+    startActivityForResult(std::move(selector), [path = book.path](const ActivityResult& result) {
+      if (result.isCancelled) return;
+      activityManager.goToReaderAtChapter(path, std::get<ChapterResult>(result.data));
+    });
+    return;
+  }
+
+  if (FsHelpers::hasXtcExtension(book.path)) {
+    auto xtc = makeUniqueNoThrow<Xtc>(book.path, "/.crosspoint");
+    if (!xtc) {
+      LOG_ERR("HOME", "OOM: chapter selection XTC");
+      showUnavailable();
+      return;
+    }
+    if (!xtc->load() || !xtc->hasChapters() || xtc->getChapters().empty()) {
+      LOG_DBG("HOME", "Chapter metadata unavailable: %s", book.path.c_str());
+      showUnavailable();
+      return;
+    }
+
+    std::shared_ptr<Xtc> sharedXtc;
+    sharedXtc = std::move(xtc);
+    auto selector = makeUniqueNoThrow<XtcReaderChapterSelectionActivity>(renderer, mappedInput, sharedXtc, 0);
+    if (!selector) {
+      LOG_ERR("HOME", "OOM: XTC chapter selector");
+      showUnavailable();
+      return;
+    }
+    startActivityForResult(std::move(selector), [path = book.path](const ActivityResult& result) {
+      if (result.isCancelled) return;
+      activityManager.goToReaderAtPage(path, std::get<PageResult>(result.data).page);
+    });
+    return;
+  }
+
+  showUnavailable();
+}
+
 void HomeActivity::promptPinBook(const int index) {
   if (!coverGridUi || !coverGridUi->isTitlesOnly() || index < 0 ||
       static_cast<size_t>(index) >= recentBooks.size()) {
@@ -614,10 +691,20 @@ void HomeActivity::promptPinBook(const int index) {
   const size_t slash = book.path.find_last_of('/');
   const char* title = book.title.empty() ? book.path.c_str() + (slash == std::string::npos ? 0 : slash + 1)
                                          : book.title.c_str();
+  const bool supportsChapterSelection =
+      FsHelpers::hasEpubExtension(book.path) || FsHelpers::hasXtcExtension(book.path);
+  const int hideOption = supportsChapterSelection ? 2 : 1;
   const char* options[] = {I18N.get(book.pinned ? StrId::STR_UNPIN_BOOK : StrId::STR_PIN_BOOK),
+                           supportsChapterSelection ? tr(STR_OPEN_CHAPTER) : tr(STR_HIDE_FROM_HOME),
                            tr(STR_HIDE_FROM_HOME)};
-  bookOptionsPopup.show(tr(STR_BOOK_OPTIONS), title, options, 2, 0, [this, book, index](const int option) {
-    if (option == 1) {
+  bookOptionsPopup.show(tr(STR_BOOK_OPTIONS), title, options, supportsChapterSelection ? 3 : 2, 0,
+                        [this, book, index, supportsChapterSelection, hideOption](const int option) {
+    if (supportsChapterSelection && option == 1) {
+      openChapterSelector(book);
+      return;
+    }
+
+    if (option == hideOption) {
       if (!RECENT_BOOKS.removeFromHome(book)) {
         const std::vector<std::string> errorOptions{tr(STR_OK_BUTTON)};
         bookOptionsPopup.show(StrId::STR_HOME_REMOVE_FAILED, errorOptions, 0, {});

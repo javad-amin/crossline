@@ -97,6 +97,17 @@ bool RecentBooksStore::isPinned(const std::string& path) const {
                      [&](const RecentBook& book) { return book.path == path; });
 }
 
+void RecentBooksStore::cacheProgress(const std::string& path, const int progressPercent) {
+  const auto cache = [&](std::vector<RecentBook>& books) {
+    const auto it = std::find_if(books.begin(), books.end(), [&](const RecentBook& book) { return book.path == path; });
+    if (it == books.end()) return;
+    it->progressPercent = progressPercent;
+    it->progressLoaded = true;
+  };
+  cache(recentBooks);
+  cache(pinnedBooks);
+}
+
 bool RecentBooksStore::removeFromHome(const RecentBook& book) {
   const auto recentIt = std::find_if(recentBooks.begin(), recentBooks.end(),
                                      [&](const RecentBook& recent) { return recent.path == book.path; });
@@ -162,6 +173,7 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
     pinned->title = title;
     pinned->author = author;
     pinned->coverBmpPath = coverBmpPath;
+    pinned->progressLoaded = false;
   }
 
   saveToFile();

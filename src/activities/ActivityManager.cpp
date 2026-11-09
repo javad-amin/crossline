@@ -316,6 +316,20 @@ void ActivityManager::goToReader(std::string path, const bool allowFastInitialRe
   }
 }
 
+void ActivityManager::goToReaderAtChapter(std::string path, ChapterResult chapter) {
+  auto activity = ReaderActivity::create(renderer, mappedInput, std::move(path), false, std::move(chapter));
+  if (activity) {
+    replaceActivity(std::move(activity));
+  }
+}
+
+void ActivityManager::goToReaderAtPage(std::string path, const uint32_t page) {
+  auto activity = ReaderActivity::create(renderer, mappedInput, std::move(path), false, std::nullopt, page);
+  if (activity) {
+    replaceActivity(std::move(activity));
+  }
+}
+
 void ActivityManager::goToSleep(bool fromTimeout) {
   replaceActivity(std::make_unique<SleepActivity>(renderer, mappedInput, fromTimeout));
   loop();  // Important: sleep screen must be rendered immediately, the caller will go to sleep right after this returns
