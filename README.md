@@ -6,7 +6,7 @@ Crossline is a personal fork of [CrossPoint Reader](https://github.com/crosspoin
 
 - **Title List home theme**: recent books shown by title and author only, without covers, as a list styled like the settings rows. The latest book sits at the bottom, is bold and outlined.
   It is the default theme on first flash for PSRAM devices (X4 Pro, X4 Classic, Sticky).
-- **Home Books setting**: show 1, 2, 4, 6 or 10 recent books (default 10). Rows keep the 10-book size, so fewer books leave the top of the screen free.
+- **Home Books setting**: show 1–10 recent books (default 10). Rows keep the 10-book size, so fewer books leave the top of the screen free.
 - **Home Background setting**: optionally shows a faded copy of the last sleep image behind the Title List, with the titles in white boxes. Works with both the Custom and Transparent sleep screens.
 - **Power button to Home**: a short power-button press can be mapped to go to Home (Settings → Controls → Short Power Button).
 - **Transparent sleep uses the Custom image**: when there is no `/sleep-overlay` image, the Transparent sleep screen falls back to `/sleep.bmp` or the `/sleep` folder, so one image works for both modes.

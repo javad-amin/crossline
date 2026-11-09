@@ -327,12 +327,15 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t uiTheme = LYRA;
 #endif
   // Title List home: index into HOME_TITLE_LIST_COUNTS.
-  static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 4, 6, 10};
-  uint8_t homeTitleListBooks = 4;
+  static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  static constexpr uint8_t HOME_TITLE_LIST_DEFAULT_INDEX = 9;
+  uint8_t homeTitleListBooks = HOME_TITLE_LIST_DEFAULT_INDEX;
   // Title List home: 1 = faded copy of the last sleep image behind the list.
   uint8_t homeBackground = 0;
   int getHomeTitleListBookCount() const {
-    return HOME_TITLE_LIST_COUNTS[homeTitleListBooks < sizeof(HOME_TITLE_LIST_COUNTS) ? homeTitleListBooks : 4];
+    return HOME_TITLE_LIST_COUNTS[homeTitleListBooks < sizeof(HOME_TITLE_LIST_COUNTS)
+                                      ? homeTitleListBooks
+                                      : HOME_TITLE_LIST_DEFAULT_INDEX];
   }
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
