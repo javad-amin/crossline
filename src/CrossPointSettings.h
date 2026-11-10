@@ -179,6 +179,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     OFF = 0,
     CHAPTER_SKIP = 1,
     ORIENTATION_CHANGE = 2,
+    BOOKMARK_NAVIGATION = 3,
     LONG_PRESS_BUTTON_BEHAVIOR_COUNT
   };
 

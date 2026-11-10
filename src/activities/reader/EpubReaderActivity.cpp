@@ -691,6 +691,18 @@ void EpubReaderActivity::loop() {
 
   const unsigned long heldMs = (touch.prev || touch.next) ? touch.heldMs : mappedInput.getHeldTime();
   const bool longPress = !fromTilt && heldMs >= ReaderUtils::SKIP_HOLD_MS;
+  if (longPress && SETTINGS.longPressButtonBehavior == SETTINGS.BOOKMARK_NAVIGATION) {
+    if (prevTriggered) {
+      addBookmark();
+      showBookmarkMessage = true;
+      bookmarkMessageTime = millis();
+      requestUpdate();
+    } else if (nextTriggered) {
+      jumpToLatestBookmark();
+    }
+    return;
+  }
+
   if (longPress && SETTINGS.longPressButtonBehavior == SETTINGS.CHAPTER_SKIP) {
     skipPages(nextTriggered ? 1 : -1);
     requestUpdate();
