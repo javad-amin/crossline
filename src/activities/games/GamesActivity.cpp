@@ -266,9 +266,18 @@ void GamesActivity::loop() {
   const auto& vis = onGames ? visibleGames : visibleApps;
   const int count = static_cast<int>(vis.size());
 
-  if (mappedInput.wasSwipe() == MappedInputManager::SwipeDir::Right ||
-      mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
+    return;
+  }
+  const auto swipe = mappedInput.wasSwipe();
+  if (swipe == MappedInputManager::SwipeDir::Left) {
+    if (activeTab == Tab::Games) { activeTab = Tab::Apps; requestUpdate(); }
+    return;
+  }
+  if (swipe == MappedInputManager::SwipeDir::Right) {
+    if (activeTab == Tab::Apps) { activeTab = Tab::Games; requestUpdate(); }
+    else { finish(); }
     return;
   }
 
