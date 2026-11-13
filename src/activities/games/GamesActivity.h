@@ -28,7 +28,6 @@ class GamesActivity final : public Activity {
   void setPinned(Tab tab, const char* id, bool pinned);
   void setHidden(Tab tab, const char* id, bool hidden);
   void showItemOptions(Tab tab, int visibleIndex);
-  void showHideConfirm(Tab tab, const char* id, const char* label);
 
   int tabBarTop() const;
   int tabBarHeight() const;
@@ -36,6 +35,12 @@ class GamesActivity final : public Activity {
   int rowHeight() const;
   void drawTabs() const;
   int indexAtPoint(int x, int y) const;
+  int hiddenCount(Tab tab) const;
+  void openHiddenList();
+  void closeHiddenList();
+  void unhideHiddenIndex(int idx);
+  bool hiddenButtonRect(int& x, int& y, int& w, int& h) const;
+  int mainListBottom() const;
 
   Tab activeTab = Tab::Games;
   int selectedIndex = 0;
@@ -50,8 +55,17 @@ class GamesActivity final : public Activity {
   std::vector<int> visibleGames; // indices into kGames
   std::vector<int> visibleApps;
 
+  bool showingHiddenList = false;
+  int hiddenListIndex = 0;
+
+  // Manual long-press fallback (more reliable across input backends/simulator)
+  uint32_t touchHoldStartMs = 0;
+  int touchHoldIndex = -1;
+  Tab touchHoldTab = Tab::Games;
+  bool touchHoldFired = false;
+
   static const Item kGames[];
   static const Item kApps[];
   static constexpr int kGameCount = 6;
-  static constexpr int kAppCount = 2;
+  static constexpr int kAppCount = 3;
 };

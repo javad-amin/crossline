@@ -423,15 +423,23 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
 }
 
 void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
-  static constexpr const uint8_t* ICONS[] = {FolderIcon, LibraryIcon, BlocksIcon, TransferIcon, Settings2Icon};
-  int count = 0;
-  for (int i = 0; i < 5; ++i) {
-    if (i == 2 && !hasOpds) continue;
-    auto& tab = tabItems[count];
-    tab.value = books->size() + count;
+  // Games is an easter egg (swipe), so no tab icon for it. Menu indices:
+  // no slot:   [Browse, Library, Transfer, Games, Settings] -> show 0,1,2,4
+  // with slot: [Browse, Library, Slot,    Transfer, Games, Settings] -> show 0,1,2,3,5
+  static constexpr const uint8_t* ICONS_WITH_SLOT[] = {FolderIcon, LibraryIcon, BlocksIcon, TransferIcon, Settings2Icon};
+  static constexpr const uint8_t* ICONS_NO_SLOT[] = {FolderIcon, LibraryIcon, TransferIcon, Settings2Icon};
+  static constexpr int MENU_WITH_SLOT[] = {0, 1, 2, 3, 5};
+  static constexpr int MENU_NO_SLOT[] = {0, 1, 2, 4};
+  const bool withSlot = hasOpds;
+  const int count = withSlot ? 5 : 4;
+  const int* menuIndices = withSlot ? MENU_WITH_SLOT : MENU_NO_SLOT;
+  const uint8_t* const* icons = withSlot ? &ICONS_WITH_SLOT[0] : &ICONS_NO_SLOT[0];
+  const int base = static_cast<int>(books->size());
+  for (int i = 0; i < count; ++i) {
+    auto& tab = tabItems[i];
+    tab.value = base + menuIndices[i];
     tab.selected = selected == tab.value;
     tab.label = nullptr;
-    ++count;
   }
   tabs.tabs = tabItems.data();
   tabs.count = count;
@@ -442,9 +450,21 @@ void CoverGridHomeUi::drawTabs(UiScreen& screen, fui::Rect rect) {
   tabs.iconPainterUserData = this;
   tabs.iconPainter = [](fui::DrawTarget&, fui::Rect iconRect, const fui::TabItem& tab, uint8_t, void* user) {
     const auto& self = *static_cast<CoverGridHomeUi*>(user);
-    const int index = tab.value - static_cast<int>(self.books->size());
-    const int icon = !self.hasOpds && index >= 2 ? index + 1 : index;
-    self.renderer.drawIcon(ICONS[icon], iconRect.x, iconRect.y, iconRect.width);
+    static constexpr const uint8_t* ICONS_WITH_SLOT[] = {FolderIcon, LibraryIcon, BlocksIcon, TransferIcon, Settings2Icon};
+    static constexpr const uint8_t* ICONS_NO_SLOT[] = {FolderIcon, LibraryIcon, TransferIcon, Settings2Icon};
+    static constexpr int MENU_WITH_SLOT[] = {0, 1, 2, 3, 5};
+    static constexpr int MENU_NO_SLOT[] = {0, 1, 2, 4};
+    const bool withSlot = self.hasOpds;
+    const int count = withSlot ? 5 : 4;
+    const int* menuIndices = withSlot ? MENU_WITH_SLOT : MENU_NO_SLOT;
+    const uint8_t* const* icons = withSlot ? &ICONS_WITH_SLOT[0] : &ICONS_NO_SLOT[0];
+    const int menuIndex = tab.value - static_cast<int>(self.books->size());
+    for (int i = 0; i < count; ++i) {
+      if (menuIndices[i] == menuIndex) {
+        self.renderer.drawIcon(icons[i], iconRect.x, iconRect.y, iconRect.width);
+        break;
+      }
+    }
     return true;
   };
   // No pill fill; the underline marks the selected tab.
