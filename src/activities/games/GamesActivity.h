@@ -10,9 +10,11 @@ class GamesActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  void openSudoku();
-  int tileLeft() const;
-  int tileTop() const;
-  int tileWidth() const;
-  int tileHeight() const;
+  enum class GameChoice : uint8_t { Sudoku = 0, Snake, Minesweeper, Nonograms, ConnectFour, Count };
+
+  void openSelected();
+  int listTop() const;
+  int rowHeight() const;
+
+  int selectedIndex = 0;
 };

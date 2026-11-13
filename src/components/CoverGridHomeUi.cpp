@@ -360,13 +360,11 @@ void CoverGridHomeUi::drawTitleList(UiScreen& screen) {
     return fui::coverGridItem(nullptr, static_cast<CoverGridHomeUi*>(user)->grid.count - 1 - index);
   };
   grid.coverPainterUserData = this;
-  grid.coverPainter = [](fui::DrawTarget& target, fui::Rect row, const fui::CoverGridItem& item, uint16_t,
-                         void* user) {
+  grid.coverPainter = [](fui::DrawTarget& target, fui::Rect row, const fui::CoverGridItem& item, uint16_t, void* user) {
     return static_cast<CoverGridHomeUi*>(user)->paintTitleRow(target, row, item.actionValue);
   };
   fui::coverGrid(screen.frame(), gridBounds, grid);
 }
-
 
 bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, const size_t index) {
   if (index >= books->size()) return false;
@@ -385,6 +383,7 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
 
   const auto style = latest ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
   const int lineHeight = std::max(1, renderer.getLineHeight(TITLE_LIST_FONT_ID));
+  constexpr int PIN_ICON_SIZE = 14;
 
   char progressLabel[12] = {};
   int progressWidth = 0;
@@ -394,7 +393,8 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
     progressWidth = renderer.getTextAdvanceX(TITLE_LIST_FONT_ID, progressLabel, EpdFontFamily::REGULAR) + 8;
   }
 
-  const int textMaxWidth = std::max(1, rect.width - 2 * TITLE_ROW_TEXT_PADDING - progressWidth);
+  const int pinPadding = book.pinned ? PIN_ICON_SIZE + 6 : 0;
+  const int textMaxWidth = std::max(1, rect.width - 2 * TITLE_ROW_TEXT_PADDING - progressWidth - pinPadding);
   const int maxLines = std::clamp((rect.height - 2 * TITLE_ROW_VPADDING) / lineHeight, 1, 3);
   const auto lines = renderer.wrappedText(TITLE_LIST_FONT_ID, title, textMaxWidth, maxLines, style);
   int y = rect.y + (rect.height - lineHeight * static_cast<int>(lines.size())) / 2;
@@ -403,10 +403,21 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
     y += lineHeight;
   }
   if (showProgress) {
-    const int progressX = rect.x + rect.width - TITLE_ROW_TEXT_PADDING -
-                           renderer.getTextAdvanceX(TITLE_LIST_FONT_ID, progressLabel, EpdFontFamily::REGULAR);
+    const int iconSpace = pinPadding;
+    const int progressX = rect.x + rect.width - TITLE_ROW_TEXT_PADDING - iconSpace -
+                          renderer.getTextAdvanceX(TITLE_LIST_FONT_ID, progressLabel, EpdFontFamily::REGULAR);
     const int progressY = rect.y + (rect.height - lineHeight) / 2;
     renderer.drawText(TITLE_LIST_FONT_ID, progressX, progressY, progressLabel, true, EpdFontFamily::REGULAR);
+  }
+  if (book.pinned) {
+    const int16_t iconX = static_cast<int16_t>(rect.x + rect.width - TITLE_ROW_TEXT_PADDING - PIN_ICON_SIZE);
+    const int16_t iconY = static_cast<int16_t>(rect.y + (rect.height - PIN_ICON_SIZE) / 2);
+    const auto pinInk = fui::Paint::solid(fui::Color::Black);
+    target.fill(fui::Rect{static_cast<int16_t>(iconX + 3), iconY, 8, 3}, pinInk, 1);
+    target.line(fui::Point{static_cast<int16_t>(iconX + 4), static_cast<int16_t>(iconY + 3)},
+                fui::Point{static_cast<int16_t>(iconX + 10), static_cast<int16_t>(iconY + 9)}, 2, pinInk);
+    target.line(fui::Point{static_cast<int16_t>(iconX + 10), static_cast<int16_t>(iconY + 9)},
+                fui::Point{static_cast<int16_t>(iconX + 4), static_cast<int16_t>(iconY + 14)}, 2, pinInk);
   }
   return true;
 }
