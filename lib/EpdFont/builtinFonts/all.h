@@ -21,3 +21,4 @@
 #include <builtinFonts/ubuntu_12_bold.h>
 #include <builtinFonts/ubuntu_12_regular.h>
 #include <builtinFonts/ubuntu_8_regular.h>
+#include <builtinFonts/notes_hand_12_regular.h>
