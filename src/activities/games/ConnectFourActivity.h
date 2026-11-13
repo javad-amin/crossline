@@ -20,9 +20,11 @@ class ConnectFourActivity final : public Activity {
   enum class State : uint8_t { Playing, P1Win, P2Win, Draw };
   enum class Mode : uint8_t { VsAI, PvP };
   enum class Difficulty : uint8_t { Easy = 0, Normal = 1, Hard = 2 };
-  enum class Screen : uint8_t { ModeSelect, DifficultySelect, Playing };
+  enum class Screen : uint8_t { StartMenu, ModeSelect, DifficultySelect, Playing };
 
   void resetBoard();
+  void continueGame();
+  void saveProgress() const;
   bool dropInColumn(int col, Cell who);
   bool dropInBoard(std::array<Cell, COLS * ROWS>& b, int col, Cell who) const;
   bool checkWin(const std::array<Cell, COLS * ROWS>& b, Cell who) const;
@@ -32,9 +34,11 @@ class ConnectFourActivity final : public Activity {
   int aiMove();
   int scoreBoard(const std::array<Cell, COLS * ROWS>& b, Cell who) const;
   int minimax(std::array<Cell, COLS * ROWS>& b, int depth, int alpha, int beta, bool maximizing) const;
+  void drawStartMenu() const;
   void drawModeSelect() const;
   void drawDifficultySelect() const;
   void drawBoard() const;
+  int startMenuTop() const;
 
   std::array<Cell, COLS * ROWS> board{};
   int cursorCol = COLS / 2;
@@ -45,4 +49,7 @@ class ConnectFourActivity final : public Activity {
   Cell current = Cell::P1;
   uint32_t rngState = 1;
   bool needsRedraw = true;
+  bool hasSavedGame = false;
+  bool aiThinking = false;
+  int startSelection = 0;
 };

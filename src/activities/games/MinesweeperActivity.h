@@ -11,13 +11,17 @@ class MinesweeperActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class Screen : uint8_t { Difficulty, Playing, Result };
+  enum class Screen : uint8_t { StartMenu, Difficulty, Playing, Result };
 
   void newGame();
+  void continueGame();
+  void saveProgress() const;
+  void drawStartMenu();
   void drawDifficulty();
   void drawBoard();
   void drawResult();
   void drawFooter();
+  int startMenuTop() const;
   int boardLeft() const;
   int boardTop() const;
   int cellSize() const;
@@ -28,4 +32,6 @@ class MinesweeperActivity final : public Activity {
   int cursorX = 0;
   int cursorY = 0;
   uint32_t rngState = 1;
+  bool hasSavedGame = false;
+  int startSelection = 0;
 };

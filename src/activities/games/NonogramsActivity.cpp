@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "MappedInputManager.h"
+#include "NonogramsProgressStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -19,8 +20,24 @@ void NonogramsActivity::onEnter() {
   Activity::onEnter();
   rngState = static_cast<uint32_t>(millis());
   if (rngState == 0) rngState = 1;
-  screen = Screen::Difficulty;
-  difficulty = Difficulty::Normal;
+  auto& progress = NonogramsProgressStore::getInstance();
+  if (progress.loadFromFile() && progress.hasSavedGame()) {
+    hasSavedGame = true;
+    n = progress.n();
+    difficulty = static_cast<Difficulty>(progress.difficulty());
+    solution = progress.solution();
+    for (int i = 0; i < MAX_N * MAX_N; ++i) {
+      grid[i] = static_cast<Mark>(progress.grid()[i]);
+    }
+    cursorX = progress.cursorX();
+    cursorY = progress.cursorY();
+    win = progress.win();
+    screen = Screen::StartMenu;
+    startSelection = 0;
+  } else {
+    screen = Screen::Difficulty;
+    difficulty = Difficulty::Normal;
+  }
   needsRedraw = true;
   requestUpdate();
 }
@@ -56,12 +73,29 @@ void NonogramsActivity::generatePuzzle() {
   }
 }
 
+void NonogramsActivity::continueGame() {
+  screen = Screen::Playing;
+  needsRedraw = true;
+  requestUpdate();
+}
+
+void NonogramsActivity::saveProgress() const {
+  std::array<NonogramsProgressStore::Mark, NonogramsProgressStore::MAX_N * NonogramsProgressStore::MAX_N> storeGrid{};
+  for (int i = 0; i < MAX_N * MAX_N; ++i) {
+    storeGrid[i] = static_cast<NonogramsProgressStore::Mark>(grid[i]);
+  }
+  NonogramsProgressStore::getInstance().saveGame(
+      n, static_cast<NonogramsProgressStore::Difficulty>(difficulty), solution, storeGrid, cursorX, cursorY, win);
+}
+
 void NonogramsActivity::reset() {
   generatePuzzle();
   std::fill(grid.begin(), grid.end(), Mark::Empty);
   cursorX = 0;
   cursorY = 0;
   win = false;
+  hasSavedGame = true;
+  saveProgress();
   needsRedraw = true;
   requestUpdate();
 }
@@ -74,10 +108,69 @@ bool NonogramsActivity::solved() const {
   return true;
 }
 
+int NonogramsActivity::startMenuTop() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+  const int listHeight = rowHeight * 2;
+  const int contentTop = metrics.topPadding + metrics.headerHeight;
+  const int contentBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight;
+  return contentTop + std::max(0, (contentBottom - contentTop - listHeight) / 2);
+}
+
 void NonogramsActivity::loop() {
+  if (screen == Screen::StartMenu) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      finish();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+      startSelection = 1 - startSelection;
+      needsRedraw = true;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (startSelection == 0) {
+        continueGame();
+      } else {
+        screen = Screen::Difficulty;
+        needsRedraw = true;
+        requestUpdate();
+      }
+      return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+      const int top = startMenuTop();
+      const int idx = (ty - top) / rowHeight;
+      const int margin = std::max(20, UITheme::getInstance().getMetrics().contentSidePadding);
+      if (tx >= margin && tx < renderer.getScreenWidth() - margin && idx >= 0 && idx < 2 && ty >= top) {
+        startSelection = idx;
+        if (startSelection == 0) {
+          continueGame();
+        } else {
+          screen = Screen::Difficulty;
+          needsRedraw = true;
+          requestUpdate();
+        }
+      }
+    }
+    if (needsRedraw) { needsRedraw = false; requestUpdate(); }
+    return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (screen == Screen::Playing) {
+      saveProgress();
       screen = Screen::Difficulty;
+      needsRedraw = true;
+      requestUpdate();
+      return;
+    }
+    if (hasSavedGame) {
+      screen = Screen::StartMenu;
       needsRedraw = true;
       requestUpdate();
       return;
@@ -194,7 +287,26 @@ void NonogramsActivity::loop() {
     }
   }
 
+  if (changed) saveProgress();
   if (changed || needsRedraw) { needsRedraw = false; requestUpdate(); }
+}
+
+void NonogramsActivity::drawStartMenu() const {
+  const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+  const int top = startMenuTop();
+  const char* labels[] = {tr(STR_CONTINUE), tr(STR_NEW_GAME)};
+  const int margin = std::max(20, UITheme::getInstance().getMetrics().contentSidePadding);
+  for (int i = 0; i < 2; ++i) {
+    const int y = top + i * rowHeight;
+    const bool selected = startSelection == i;
+    if (selected) {
+      renderer.fillRect(margin, y, renderer.getScreenWidth() - margin * 2, rowHeight - 4);
+    } else {
+      renderer.drawRect(margin, y, renderer.getScreenWidth() - margin * 2, rowHeight - 4);
+    }
+    renderer.drawCenteredText(UI_12_FONT_ID, y + (rowHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2, labels[i],
+                              !selected);
+  }
 }
 
 void NonogramsActivity::drawDifficulty() const {
@@ -307,12 +419,15 @@ void NonogramsActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_NONOGRAMS));
-  if (screen == Screen::Difficulty) drawDifficulty();
+  if (screen == Screen::StartMenu) drawStartMenu();
+  else if (screen == Screen::Difficulty) drawDifficulty();
   else drawBoard();
 
   const char* hint = tr(STR_SELECT);
   if (screen == Screen::Playing && win) hint = tr(STR_NEW_GAME);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), hint, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const char* leftHint = (screen == Screen::StartMenu || screen == Screen::Difficulty) ? tr(STR_DIR_UP) : tr(STR_DIR_UP);
+  const char* rightHint = (screen == Screen::StartMenu || screen == Screen::Difficulty) ? tr(STR_DIR_DOWN) : tr(STR_DIR_DOWN);
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), hint, leftHint, rightHint);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

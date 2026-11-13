@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "ConnectFourProgressStore.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -17,10 +18,27 @@ void ConnectFourActivity::onEnter() {
   Activity::onEnter();
   rngState = static_cast<uint32_t>(millis());
   if (rngState == 0) rngState = 1;
-  screen = Screen::ModeSelect;
-  mode = Mode::VsAI;
-  difficulty = Difficulty::Normal;
-  resetBoard();
+  auto& progress = ConnectFourProgressStore::getInstance();
+  if (progress.loadFromFile() && progress.hasSavedGame()) {
+    hasSavedGame = true;
+    screen = static_cast<Screen>(progress.screen());
+    for (int i = 0; i < COLS * ROWS; ++i) {
+      board[i] = static_cast<Cell>(progress.board()[i]);
+    }
+    cursorCol = progress.cursorCol();
+    state = static_cast<State>(progress.state());
+    mode = static_cast<Mode>(progress.mode());
+    difficulty = static_cast<Difficulty>(progress.difficulty());
+    current = static_cast<Cell>(progress.current());
+    rngState = progress.rngState();
+    screen = Screen::StartMenu;
+    startSelection = 0;
+  } else {
+    screen = Screen::ModeSelect;
+    mode = Mode::VsAI;
+    difficulty = Difficulty::Normal;
+    resetBoard();
+  }
   needsRedraw = true;
   requestUpdate();
 }
@@ -30,7 +48,36 @@ void ConnectFourActivity::resetBoard() {
   cursorCol = COLS / 2;
   state = State::Playing;
   current = Cell::P1;
+  aiThinking = false;
   needsRedraw = true;
+}
+
+void ConnectFourActivity::continueGame() {
+  auto& progress = ConnectFourProgressStore::getInstance();
+  screen = static_cast<Screen>(progress.screen());
+  needsRedraw = true;
+  requestUpdate();
+}
+
+void ConnectFourActivity::saveProgress() const {
+  std::array<ConnectFourProgressStore::Cell, ConnectFourProgressStore::COLS * ConnectFourProgressStore::ROWS> storeBoard{};
+  for (int i = 0; i < COLS * ROWS; ++i) {
+    storeBoard[i] = static_cast<ConnectFourProgressStore::Cell>(board[i]);
+  }
+  ConnectFourProgressStore::getInstance().saveGame(
+      static_cast<ConnectFourProgressStore::Screen>(screen), storeBoard, cursorCol,
+      static_cast<ConnectFourProgressStore::State>(state), static_cast<ConnectFourProgressStore::Mode>(mode),
+      static_cast<ConnectFourProgressStore::Difficulty>(difficulty),
+      static_cast<ConnectFourProgressStore::Cell>(current), rngState);
+}
+
+int ConnectFourActivity::startMenuTop() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+  const int listHeight = rowHeight * 2;
+  const int contentTop = metrics.topPadding + metrics.headerHeight;
+  const int contentBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight;
+  return contentTop + std::max(0, (contentBottom - contentTop - listHeight) / 2);
 }
 
 bool ConnectFourActivity::dropInBoard(std::array<Cell, COLS * ROWS>& b, int col, Cell who) const {
@@ -222,8 +269,51 @@ int ConnectFourActivity::aiMove() {
 }
 
 void ConnectFourActivity::loop() {
+  if (screen == Screen::StartMenu) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      finish();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+      startSelection = 1 - startSelection;
+      needsRedraw = true;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (startSelection == 0) continueGame();
+      else {
+        screen = Screen::ModeSelect;
+        needsRedraw = true;
+        requestUpdate();
+      }
+      return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+      const int top = startMenuTop();
+      const int idx = (ty - top) / rowHeight;
+      const int margin = std::max(20, UITheme::getInstance().getMetrics().contentSidePadding);
+      if (tx >= margin && tx < renderer.getScreenWidth() - margin && idx >= 0 && idx < 2 && ty >= top) {
+        startSelection = idx;
+        if (startSelection == 0) continueGame();
+        else {
+          screen = Screen::ModeSelect;
+          needsRedraw = true;
+          requestUpdate();
+        }
+      }
+    }
+    if (needsRedraw) { needsRedraw = false; requestUpdate(); }
+    return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (screen == Screen::Playing) {
+      aiThinking = false;
+      saveProgress();
       screen = Screen::ModeSelect;
       needsRedraw = true;
       requestUpdate();
@@ -231,6 +321,12 @@ void ConnectFourActivity::loop() {
     }
     if (screen == Screen::DifficultySelect) {
       screen = Screen::ModeSelect;
+      needsRedraw = true;
+      requestUpdate();
+      return;
+    }
+    if (hasSavedGame) {
+      screen = Screen::StartMenu;
       needsRedraw = true;
       requestUpdate();
       return;
@@ -247,7 +343,7 @@ void ConnectFourActivity::loop() {
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       if (mode == Mode::VsAI) screen = Screen::DifficultySelect;
-      else { screen = Screen::Playing; resetBoard(); }
+      else { screen = Screen::Playing; resetBoard(); hasSavedGame = true; saveProgress(); }
       needsRedraw = true; requestUpdate(); return;
     }
     int tx = 0, ty = 0;
@@ -259,7 +355,7 @@ void ConnectFourActivity::loop() {
       if (idx == 0 || idx == 1) {
         mode = (idx == 0) ? Mode::VsAI : Mode::PvP;
         if (mode == Mode::VsAI) screen = Screen::DifficultySelect;
-        else { screen = Screen::Playing; resetBoard(); }
+        else { screen = Screen::Playing; resetBoard(); hasSavedGame = true; saveProgress(); }
         needsRedraw = true; requestUpdate(); return;
       }
     }
@@ -279,6 +375,8 @@ void ConnectFourActivity::loop() {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       screen = Screen::Playing;
       resetBoard();
+      hasSavedGame = true;
+      saveProgress();
       needsRedraw = true; requestUpdate(); return;
     }
     int tx = 0, ty = 0;
@@ -291,6 +389,8 @@ void ConnectFourActivity::loop() {
         difficulty = static_cast<Difficulty>(idx);
         screen = Screen::Playing;
         resetBoard();
+        hasSavedGame = true;
+        saveProgress();
         needsRedraw = true; requestUpdate(); return;
       }
     }
@@ -299,8 +399,24 @@ void ConnectFourActivity::loop() {
   }
 
   if (state != State::Playing) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) { resetBoard(); requestUpdate(); }
-    else if (needsRedraw) { needsRedraw = false; requestUpdate(); }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      resetBoard();
+      hasSavedGame = true;
+      saveProgress();
+      requestUpdate();
+    } else if (needsRedraw) { needsRedraw = false; requestUpdate(); }
+    return;
+  }
+
+  if (aiThinking) {
+    const int aiCol = aiMove();
+    if (aiCol >= 0) dropInColumn(aiCol, Cell::P2);
+    if (checkWin(Cell::P2)) state = State::P2Win;
+    else if (isFull()) state = State::Draw;
+    aiThinking = false;
+    saveProgress();
+    needsRedraw = false;
+    requestUpdate();
     return;
   }
 
@@ -314,10 +430,8 @@ void ConnectFourActivity::loop() {
     if (isFull()) { state = State::Draw; return true; }
 
     if (mode == Mode::VsAI) {
-      const int aiCol = aiMove();
-      if (aiCol >= 0) dropInColumn(aiCol, Cell::P2);
-      if (checkWin(Cell::P2)) state = State::P2Win;
-      else if (isFull()) state = State::Draw;
+      aiThinking = true;
+      return true;
     } else {
       current = (current == Cell::P1) ? Cell::P2 : Cell::P1;
     }
@@ -350,6 +464,7 @@ void ConnectFourActivity::loop() {
     }
   }
 
+  if (changed) saveProgress();
   if (changed || needsRedraw) { needsRedraw = false; requestUpdate(); }
 }
 
@@ -423,6 +538,8 @@ void ConnectFourActivity::drawBoard() const {
     renderer.drawCenteredText(UI_12_FONT_ID, statusY, tr(STR_CONNECT_FOUR_DRAW));
   } else if (mode == Mode::PvP) {
     renderer.drawCenteredText(UI_10_FONT_ID, statusY, current == Cell::P1 ? "Turn: X" : "Turn: O");
+  } else if (aiThinking) {
+    renderer.drawCenteredText(UI_12_FONT_ID, statusY, "Thinking...");
   } else {
     const char* diff = difficulty == Difficulty::Easy ? tr(STR_SUDOKU_EASY) : (difficulty == Difficulty::Normal ? tr(STR_SUDOKU_NORMAL) : tr(STR_SUDOKU_HARD));
     char buf[32];
@@ -431,17 +548,37 @@ void ConnectFourActivity::drawBoard() const {
   }
 }
 
+void ConnectFourActivity::drawStartMenu() const {
+  const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+  const int top = startMenuTop();
+  const char* labels[] = {tr(STR_CONTINUE), tr(STR_NEW_GAME)};
+  const int margin = std::max(20, UITheme::getInstance().getMetrics().contentSidePadding);
+  for (int i = 0; i < 2; ++i) {
+    const int y = top + i * rowHeight;
+    const bool selected = startSelection == i;
+    if (selected) {
+      renderer.fillRect(margin, y, renderer.getScreenWidth() - margin * 2, rowHeight - 4);
+    } else {
+      renderer.drawRect(margin, y, renderer.getScreenWidth() - margin * 2, rowHeight - 4);
+    }
+    renderer.drawCenteredText(UI_12_FONT_ID, y + (rowHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2, labels[i],
+                              !selected);
+  }
+}
+
 void ConnectFourActivity::render(RenderLock&&) {
   needsRedraw = false;
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_CONNECT_FOUR));
-  if (screen == Screen::ModeSelect) drawModeSelect();
+  if (screen == Screen::StartMenu) drawStartMenu();
+  else if (screen == Screen::ModeSelect) drawModeSelect();
   else if (screen == Screen::DifficultySelect) drawDifficultySelect();
   else drawBoard();
   const char* hint = tr(STR_SELECT);
   if (screen == Screen::Playing && state != State::Playing) hint = tr(STR_NEW_GAME);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), hint, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  else if (screen == Screen::Playing && aiThinking) hint = "";
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), hint, aiThinking ? "" : tr(STR_DIR_LEFT), aiThinking ? "" : tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

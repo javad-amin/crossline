@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "MappedInputManager.h"
+#include "SnakeProgressStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -17,8 +18,57 @@ void SnakeActivity::onEnter() {
   Activity::onEnter();
   rngState = static_cast<uint32_t>(millis());
   if (rngState == 0) rngState = 1;
-  resetGame();
+  auto& progress = SnakeProgressStore::getInstance();
+  if (progress.loadFromFile() && progress.hasSavedGame()) {
+    hasSavedGame = true;
+    state = static_cast<State>(progress.state());
+    snakeLen = progress.snakeLen();
+    headIndex = progress.headIndex();
+    food = Point{progress.food().x, progress.food().y};
+    dirX = progress.dirX();
+    dirY = progress.dirY();
+    nextDirX = progress.nextDirX();
+    nextDirY = progress.nextDirY();
+    score = progress.score();
+    tickIntervalMs = progress.tickIntervalMs();
+    rngState = progress.rngState();
+    for (int i = 0; i < MAX_LEN; ++i) {
+      snake[i] = Point{progress.snake()[i].x, progress.snake()[i].y};
+    }
+    screen = Screen::StartMenu;
+    startSelection = 0;
+  } else {
+    resetGame();
+    screen = Screen::Playing;
+  }
   requestUpdate();
+}
+
+void SnakeActivity::continueGame() {
+  screen = Screen::Playing;
+  if (state == State::Playing) {
+    lastTickMs = millis();
+  }
+  requestUpdate();
+}
+
+void SnakeActivity::saveProgress() const {
+  std::array<SnakeProgressStore::Point, SnakeProgressStore::MAX_LEN> storeSnake{};
+  for (int i = 0; i < MAX_LEN; ++i) {
+    storeSnake[i] = SnakeProgressStore::Point{snake[i].x, snake[i].y};
+  }
+  SnakeProgressStore::getInstance().saveGame(static_cast<SnakeProgressStore::State>(state), storeSnake, snakeLen,
+                                             headIndex, SnakeProgressStore::Point{food.x, food.y}, dirX, dirY, nextDirX,
+                                             nextDirY, score, tickIntervalMs, rngState);
+}
+
+int SnakeActivity::startMenuTop() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+  const int listHeight = rowHeight * 2;
+  const int contentTop = metrics.topPadding + metrics.headerHeight;
+  const int contentBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight;
+  return contentTop + std::max(0, (contentBottom - contentTop - listHeight) / 2);
 }
 
 void SnakeActivity::resetGame() {
@@ -38,6 +88,8 @@ void SnakeActivity::resetGame() {
   tickIntervalMs = 650;
   lastTickMs = millis();
   placeFood();
+  hasSavedGame = true;
+  saveProgress();
 }
 
 bool SnakeActivity::isOpposite(const int8_t dx, const int8_t dy) const {
@@ -113,6 +165,7 @@ void SnakeActivity::step() {
   // wall collision
   if (next.x < 0 || next.x >= GRID_W || next.y < 0 || next.y >= GRID_H) {
     state = State::GameOver;
+    saveProgress();
     requestUpdate();
     return;
   }
@@ -121,6 +174,7 @@ void SnakeActivity::step() {
   // self collision (tail moves unless growing)
   if (occupies(next, grow)) {
     state = State::GameOver;
+    saveProgress();
     requestUpdate();
     return;
   }
@@ -134,12 +188,55 @@ void SnakeActivity::step() {
     placeFood();
   }
 
+  saveProgress();
   requestUpdate();
 }
 
 void SnakeActivity::loop() {
+  if (screen == Screen::StartMenu) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      finish();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+      startSelection = 1 - startSelection;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (startSelection == 0) {
+        continueGame();
+      } else {
+        screen = Screen::Playing;
+        resetGame();
+        requestUpdate();
+      }
+      return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+      const int top = startMenuTop();
+      const int idx = (ty - top) / rowHeight;
+      const int margin = std::max(20, UITheme::getInstance().getMetrics().contentSidePadding);
+      if (tx >= margin && tx < renderer.getScreenWidth() - margin && idx >= 0 && idx < 2 && ty >= top) {
+        startSelection = idx;
+        if (startSelection == 0) {
+          continueGame();
+        } else {
+          screen = Screen::Playing;
+          resetGame();
+          requestUpdate();
+        }
+      }
+    }
+    return;
+  }
+
   // Global exits
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    saveProgress();
     finish();
     return;
   }
@@ -149,6 +246,7 @@ void SnakeActivity::loop() {
       resetGame();
       state = State::Playing;
       lastTickMs = millis();
+      saveProgress();
       requestUpdate();
       return;
     }
@@ -158,49 +256,58 @@ void SnakeActivity::loop() {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       state = State::Playing;
       lastTickMs = millis();
+      saveProgress();
       requestUpdate();
       return;
     }
   } else if (state == State::Playing) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       state = State::Paused;
+      saveProgress();
       requestUpdate();
       return;
     }
   }
 
+  bool stateChanged = false;
   // Direction input
   if (mappedInput.wasReleased(MappedInputManager::Button::Up) || mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
     if (state == State::Ready) {
       state = State::Playing;
       lastTickMs = millis();
+      stateChanged = true;
     }
     setDirection(0, -1);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Down) || mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
     if (state == State::Ready) {
       state = State::Playing;
       lastTickMs = millis();
+      stateChanged = true;
     }
     setDirection(0, 1);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
     if (state == State::Ready) {
       state = State::Playing;
       lastTickMs = millis();
+      stateChanged = true;
     }
     setDirection(-1, 0);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
     if (state == State::Ready) {
       state = State::Playing;
       lastTickMs = millis();
+      stateChanged = true;
     }
     setDirection(1, 0);
   }
 
   const auto swipe = mappedInput.wasSwipe();
-  if (swipe == MappedInputManager::SwipeDir::Up) setDirection(0, -1);
-  else if (swipe == MappedInputManager::SwipeDir::Down) setDirection(0, 1);
-  else if (swipe == MappedInputManager::SwipeDir::Left) setDirection(-1, 0);
-  else if (swipe == MappedInputManager::SwipeDir::Right) setDirection(1, 0);
+  if (swipe == MappedInputManager::SwipeDir::Up) { if (state == State::Ready) { state = State::Playing; lastTickMs = millis(); stateChanged = true; } setDirection(0, -1); }
+  else if (swipe == MappedInputManager::SwipeDir::Down) { if (state == State::Ready) { state = State::Playing; lastTickMs = millis(); stateChanged = true; } setDirection(0, 1); }
+  else if (swipe == MappedInputManager::SwipeDir::Left) { if (state == State::Ready) { state = State::Playing; lastTickMs = millis(); stateChanged = true; } setDirection(-1, 0); }
+  else if (swipe == MappedInputManager::SwipeDir::Right) { if (state == State::Ready) { state = State::Playing; lastTickMs = millis(); stateChanged = true; } setDirection(1, 0); }
+
+  if (stateChanged) saveProgress();
 
   if (state == State::Playing) {
     const unsigned long now = millis();
@@ -211,10 +318,36 @@ void SnakeActivity::loop() {
   }
 }
 
+void SnakeActivity::drawStartMenu() const {
+  const int rowHeight = std::max(54, renderer.getLineHeight(UI_12_FONT_ID) + 28);
+  const int top = startMenuTop();
+  const char* labels[] = {tr(STR_CONTINUE), tr(STR_NEW_GAME)};
+  const int margin = std::max(20, UITheme::getInstance().getMetrics().contentSidePadding);
+  for (int i = 0; i < 2; ++i) {
+    const int y = top + i * rowHeight;
+    const bool selected = startSelection == i;
+    if (selected) {
+      renderer.fillRect(margin, y, renderer.getScreenWidth() - margin * 2, rowHeight - 4);
+    } else {
+      renderer.drawRect(margin, y, renderer.getScreenWidth() - margin * 2, rowHeight - 4);
+    }
+    renderer.drawCenteredText(UI_12_FONT_ID, y + (rowHeight - renderer.getLineHeight(UI_12_FONT_ID)) / 2, labels[i],
+                              !selected);
+  }
+}
+
 void SnakeActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_SNAKE));
+
+  if (screen == Screen::StartMenu) {
+    drawStartMenu();
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
 
   char scoreText[48];
   snprintf(scoreText, sizeof(scoreText), "%s: %d", tr(STR_SNAKE_SCORE), score);
