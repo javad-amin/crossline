@@ -1,12 +1,15 @@
 #include "GamesActivity.h"
 
+#include <ArduinoJson.h>
 #include <GfxRenderer.h>
+#include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
 
 #include <algorithm>
-#include <array>
 
+#include "../apps/CalculatorActivity.h"
+#include "../apps/StopwatchActivity.h"
 #include "ConnectFourActivity.h"
 #include "MappedInputManager.h"
 #include "MinesweeperActivity.h"
@@ -14,8 +17,6 @@
 #include "SnakeActivity.h"
 #include "SudokuActivity.h"
 #include "chess/ChessActivity.h"
-#include "../apps/CalculatorActivity.h"
-#include "../apps/StopwatchActivity.h"
 #include "components/UITheme.h"
 #include "components/icons/chess_icon.h"
 #include "components/icons/connect_four_icon.h"
@@ -25,81 +26,156 @@
 #include "components/icons/sudoku_icon.h"
 #include "fontIds.h"
 
+namespace {
+constexpr char kPrefsPath[] = "/.crosspoint/games_hub.json";
+
+const char* labelChess() { return "Chess"; }
+const char* labelCalc() { return "Calculator"; }
+const char* labelStopwatch() { return "Stopwatch"; }
+
+bool containsStr(const std::vector<std::string>& v, const char* id) {
+  return std::find(v.begin(), v.end(), id) != v.end();
+}
+void removeStr(std::vector<std::string>& v, const char* id) {
+  v.erase(std::remove(v.begin(), v.end(), id), v.end());
+}
+}
+
+const GamesActivity::Item GamesActivity::kGames[] = {
+    {"chess", nullptr, ChessIcon.data()},
+    {"connectfour", nullptr, ConnectFourIcon.data()},
+    {"minesweeper", nullptr, MinesweeperIcon.data()},
+    {"nonograms", nullptr, NonogramsIcon.data()},
+    {"snake", nullptr, SnakeIcon.data()},
+    {"sudoku", nullptr, SudokuIcon.data()},
+};
+const GamesActivity::Item GamesActivity::kApps[] = {
+    {"calculator", nullptr, nullptr},
+    {"stopwatch", nullptr, nullptr},
+};
+
 GamesActivity::GamesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("Games", renderer, mappedInput) {}
 
 void GamesActivity::onEnter() {
   Activity::onEnter();
+  loadPrefs();
+  rebuildLists();
   requestUpdate();
 }
 
-int GamesActivity::currentCount() const {
-  return activeTab == Tab::Games ? static_cast<int>(GameChoice::Count) : static_cast<int>(AppChoice::Count);
+bool GamesActivity::isPinned(Tab tab, const char* id) const {
+  return containsStr(tab == Tab::Games ? pinnedGames : pinnedApps, id);
+}
+bool GamesActivity::isHidden(Tab tab, const char* id) const {
+  return containsStr(tab == Tab::Games ? hiddenGames : hiddenApps, id);
+}
+void GamesActivity::setPinned(Tab tab, const char* id, bool pinned) {
+  auto& v = tab == Tab::Games ? pinnedGames : pinnedApps;
+  removeStr(v, id);
+  if (pinned) v.insert(v.begin(), id);
+}
+void GamesActivity::setHidden(Tab tab, const char* id, bool hidden) {
+  auto& v = tab == Tab::Games ? hiddenGames : hiddenApps;
+  removeStr(v, id);
+  if (hidden) v.push_back(id);
+  // also unpin when hiding
+  if (hidden) setPinned(tab, id, false);
 }
 
-void GamesActivity::openSelected() {
+void GamesActivity::loadPrefs() {
+  pinnedGames.clear(); pinnedApps.clear(); hiddenGames.clear(); hiddenApps.clear();
+  if (!Storage.exists(kPrefsPath)) return;
+  std::unique_ptr<char[]> buf(new (std::nothrow) char[2048]);
+  if (!buf) return;
+  const size_t n = Storage.readFileToBuffer(kPrefsPath, buf.get(), 2047);
+  if (n == 0) return;
+  buf[n] = '\0';
+  JsonDocument doc;
+  if (deserializeJson(doc, buf.get())) return;
+  auto loadArr = [&](const char* key, std::vector<std::string>& out) {
+    JsonArray a = doc[key].as<JsonArray>();
+    if (a.isNull()) return;
+    for (JsonVariant v : a) { if (v.is<const char*>()) out.emplace_back(v.as<const char*>()); }
+  };
+  loadArr("pinnedGames", pinnedGames);
+  loadArr("pinnedApps", pinnedApps);
+  loadArr("hiddenGames", hiddenGames);
+  loadArr("hiddenApps", hiddenApps);
+}
+
+void GamesActivity::savePrefs() const {
+  JsonDocument doc;
+  auto saveArr = [&](const char* key, const std::vector<std::string>& v) {
+    JsonArray a = doc[key].to<JsonArray>();
+    for (auto& s : v) a.add(s.c_str());
+  };
+  saveArr("pinnedGames", pinnedGames);
+  saveArr("pinnedApps", pinnedApps);
+  saveArr("hiddenGames", hiddenGames);
+  saveArr("hiddenApps", hiddenApps);
+  char out[2048];
+  const size_t n = serializeJson(doc, out, sizeof(out));
+  if (n > 0) Storage.writeFile(kPrefsPath, String(out));
+}
+
+void GamesActivity::rebuildLists() {
+  visibleGames.clear();
+  visibleApps.clear();
+  auto build = [&](Tab tab, int count, const Item* items, std::vector<int>& out) {
+    const auto& pinned = tab == Tab::Games ? pinnedGames : pinnedApps;
+    // pinned first in pinned order
+    for (const auto& id : pinned) {
+      if (isHidden(tab, id.c_str())) continue;
+      for (int i = 0; i < count; ++i) if (items[i].id == id || std::string(items[i].id) == id) { out.push_back(i); break; }
+    }
+    // rest in original order
+    for (int i = 0; i < count; ++i) {
+      if (isHidden(tab, items[i].id)) continue;
+      if (isPinned(tab, items[i].id)) continue;
+      out.push_back(i);
+    }
+  };
+  build(Tab::Games, kGameCount, kGames, visibleGames);
+  build(Tab::Apps, kAppCount, kApps, visibleApps);
+  selectedIndex = std::clamp(selectedIndex, 0, std::max(0, static_cast<int>(visibleGames.size()) - 1));
+  appSelectedIndex = std::clamp(appSelectedIndex, 0, std::max(0, static_cast<int>(visibleApps.size()) - 1));
+}
+
+void GamesActivity::openSelectedIndex(int idx) {
   if (activeTab == Tab::Games) {
-    switch (static_cast<GameChoice>(selectedIndex)) {
-      case GameChoice::Chess: {
-        auto activity = makeUniqueNoThrow<ChessActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case GameChoice::ConnectFour: {
-        auto activity = makeUniqueNoThrow<ConnectFourActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case GameChoice::Minesweeper: {
-        auto activity = makeUniqueNoThrow<MinesweeperActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case GameChoice::Nonograms: {
-        auto activity = makeUniqueNoThrow<NonogramsActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case GameChoice::Snake: {
-        auto activity = makeUniqueNoThrow<SnakeActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case GameChoice::Sudoku: {
-        auto activity = makeUniqueNoThrow<SudokuActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case GameChoice::Count:
-        return;
+    if (idx < 0 || idx >= static_cast<int>(visibleGames.size())) return;
+    const int gi = visibleGames[idx];
+    switch (gi) {
+      case 0: if (auto a = makeUniqueNoThrow<ChessActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 1: if (auto a = makeUniqueNoThrow<ConnectFourActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 2: if (auto a = makeUniqueNoThrow<MinesweeperActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 3: if (auto a = makeUniqueNoThrow<NonogramsActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 4: if (auto a = makeUniqueNoThrow<SnakeActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 5: if (auto a = makeUniqueNoThrow<SudokuActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      default: return;
     }
   } else {
-    switch (static_cast<AppChoice>(appSelectedIndex)) {
-      case AppChoice::Calculator: {
-        auto activity = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case AppChoice::Stopwatch: {
-        auto activity = makeUniqueNoThrow<StopwatchActivity>(renderer, mappedInput);
-        if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
-        return;
-      }
-      case AppChoice::Count:
-        return;
+    if (idx < 0 || idx >= static_cast<int>(visibleApps.size())) return;
+    const int ai = visibleApps[idx];
+    switch (ai) {
+      case 0: if (auto a = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 1: if (auto a = makeUniqueNoThrow<StopwatchActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      default: return;
     }
   }
 }
 
-int GamesActivity::tabBarHeight() const { return std::max(36, renderer.getLineHeight(UI_10_FONT_ID) + 16); }
+void GamesActivity::openSelected() {
+  openSelectedIndex(activeTab == Tab::Games ? selectedIndex : appSelectedIndex);
+}
 
+int GamesActivity::tabBarHeight() const { return std::max(36, renderer.getLineHeight(UI_10_FONT_ID) + 16); }
 int GamesActivity::tabBarTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   return metrics.topPadding + metrics.headerHeight;
 }
-
 int GamesActivity::rowHeight() const { return std::max(44, renderer.getLineHeight(UI_12_FONT_ID) + 20); }
-
 int GamesActivity::listTop() const { return tabBarTop() + tabBarHeight() + 8; }
 
 void GamesActivity::drawTabs() const {
@@ -108,25 +184,87 @@ void GamesActivity::drawTabs() const {
   const int h = tabBarHeight();
   const int margin = std::max(16, metrics.contentSidePadding);
   const int w = renderer.getScreenWidth() - margin * 2;
-  const int half = w / 2;
+  const int gap = 6;
+  const int tabW = (w - gap) / 2;
   const char* labels[] = {tr(STR_GAMES), "Apps"};
   for (int i = 0; i < 2; ++i) {
-    const int x = margin + i * half;
+    const int x = margin + i * (tabW + gap);
     const bool active = static_cast<int>(activeTab) == i;
     if (active) {
-      renderer.fillRect(x, top, half, h);
+      renderer.fillRect(x, top, tabW, h);
+      renderer.drawRect(x, top, tabW, h, 2, true);
     } else {
-      renderer.drawRect(x, top, half, h);
+      renderer.drawRect(x, top, tabW, h, true);
     }
     const int ty = top + (h - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
     renderer.drawCenteredText(UI_12_FONT_ID, ty, labels[i], !active);
   }
-  renderer.fillRect(margin, top + h - 2, w, 2);
+}
+
+int GamesActivity::indexAtPoint(int x, int y) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int margin = std::max(16, metrics.contentSidePadding);
+  const int rh = rowHeight();
+  const int top = listTop();
+  const int count = activeTab == Tab::Games ? static_cast<int>(visibleGames.size()) : static_cast<int>(visibleApps.size());
+  if (x >= margin && x < renderer.getScreenWidth() - margin && y >= top) {
+    const int idx = (y - top) / rh;
+    if (idx >= 0 && idx < count) return idx;
+  }
+  return -1;
+}
+
+void GamesActivity::showHideConfirm(Tab tab, const char* id, const char* label) {
+  const char* opts[] = {"Cancel", "Hide"};
+  optionPopup.show("Hide item?", label, opts, 2, 0, [this, tab, id](int choice) {
+    if (choice == 1) {
+      setHidden(tab, id, true);
+      savePrefs();
+      rebuildLists();
+    }
+    requestUpdate();
+  });
+}
+
+void GamesActivity::showItemOptions(Tab tab, int visibleIndex) {
+  const bool onGames = tab == Tab::Games;
+  const auto& vis = onGames ? visibleGames : visibleApps;
+  if (visibleIndex < 0 || visibleIndex >= static_cast<int>(vis.size())) return;
+  const Item& item = onGames ? kGames[vis[visibleIndex]] : kApps[vis[visibleIndex]];
+  const bool pinned = isPinned(tab, item.id);
+  const char* opts[] = {pinned ? "Unpin" : "Pin to top", "Hide", "Cancel"};
+  std::string title;
+  if (onGames) {
+    const std::string id = item.id;
+    if (id == "chess") title = "Chess";
+    else if (id == "connectfour") title = tr(STR_CONNECT_FOUR);
+    else if (id == "minesweeper") title = tr(STR_MINESWEEPER);
+    else if (id == "nonograms") title = tr(STR_NONOGRAMS);
+    else if (id == "snake") title = tr(STR_SNAKE);
+    else title = tr(STR_SUDOKU);
+  } else {
+    title = (std::string(item.id) == "calculator") ? "Calculator" : "Stopwatch";
+  }
+  optionPopup.show("Options", title.c_str(), opts, 3, 0, [this, tab, id=item.id, title](int choice) {
+    if (choice == 0) {
+      setPinned(tab, id, !isPinned(tab, id));
+      savePrefs();
+      rebuildLists();
+    } else if (choice == 1) {
+      showHideConfirm(tab, id, title.c_str());
+      return;
+    }
+    requestUpdate();
+  });
 }
 
 void GamesActivity::loop() {
+  if (optionPopup.handleInput(mappedInput, [this]{ requestUpdate(); })) return;
+
   const bool onGames = activeTab == Tab::Games;
   int& sel = onGames ? selectedIndex : appSelectedIndex;
+  const auto& vis = onGames ? visibleGames : visibleApps;
+  const int count = static_cast<int>(vis.size());
 
   if (mappedInput.wasSwipe() == MappedInputManager::SwipeDir::Right ||
       mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -134,80 +272,71 @@ void GamesActivity::loop() {
     return;
   }
 
-  const int count = currentCount();
-  if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
-    sel = (sel + count - 1) % count;
-    requestUpdate();
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
-    sel = (sel + 1) % count;
-    requestUpdate();
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
-    if (activeTab == Tab::Apps) {
-      activeTab = Tab::Games;
-      requestUpdate();
-    } else {
-      sel = (sel + count - 1) % count;
-      requestUpdate();
+  if (count == 0) {
+    // nothing to select; allow tab switching
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left) || mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
+      if (activeTab == Tab::Apps) { activeTab = Tab::Games; requestUpdate(); }
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Right) || mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
+      if (activeTab == Tab::Games) { activeTab = Tab::Apps; requestUpdate(); }
     }
+    int x=0,y=0;
+    if (mappedInput.wasScreenTapped(x,y)) {
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const int margin = std::max(16, metrics.contentSidePadding);
+      const int w = renderer.getScreenWidth() - margin * 2;
+      const int gap = 6; const int tabW = (w-gap)/2;
+      if (y >= tabBarTop() && y < tabBarTop()+tabBarHeight()) {
+        if (x>=margin && x<margin+tabW) { activeTab=Tab::Games; requestUpdate(); }
+        else if (x>=margin+tabW+gap && x<margin+tabW*2+gap) { activeTab=Tab::Apps; requestUpdate(); }
+      }
+    }
+    return;
+  }
+
+  // Long press for options
+  if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, 700)) {
+    showItemOptions(activeTab, sel);
+    return;
+  }
+  int tx = 0, ty = 0;
+  if (mappedInput.wasScreenLongPress(tx, ty)) {
+    const int idx = indexAtPoint(tx, ty);
+    if (idx >= 0) { sel = idx; showItemOptions(activeTab, idx); return; }
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Up)) { sel = (sel + count - 1) % count; requestUpdate(); return; }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Down)) { sel = (sel + 1) % count; requestUpdate(); return; }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+    if (activeTab == Tab::Apps) { activeTab = Tab::Games; requestUpdate(); }
+    else { sel = (sel + count - 1) % count; requestUpdate(); }
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
-    if (activeTab == Tab::Games) {
-      activeTab = Tab::Apps;
-      requestUpdate();
-    } else {
-      sel = (sel + 1) % count;
-      requestUpdate();
-    }
+    if (activeTab == Tab::Games) { activeTab = Tab::Apps; requestUpdate(); }
+    else { sel = (sel + 1) % count; requestUpdate(); }
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    openSelected();
-    return;
-  }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) { openSelectedIndex(sel); return; }
+  if (mappedInput.wasReleased(MappedInputManager::Button::PageBack)) { activeTab = Tab::Games; requestUpdate(); return; }
+  if (mappedInput.wasReleased(MappedInputManager::Button::PageForward)) { activeTab = Tab::Apps; requestUpdate(); return; }
 
-  // Page buttons can switch tabs quickly too
-  if (mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
-    activeTab = Tab::Games;
-    requestUpdate();
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
-    activeTab = Tab::Apps;
-    requestUpdate();
-    return;
-  }
-
-  int x = 0, y = 0;
-  if (mappedInput.wasScreenTapped(x, y)) {
+  if (mappedInput.wasScreenTapped(tx, ty)) {
     const auto& metrics = UITheme::getInstance().getMetrics();
     const int margin = std::max(16, metrics.contentSidePadding);
     const int w = renderer.getScreenWidth() - margin * 2;
-    const int half = w / 2;
-    const int tTop = tabBarTop();
-    const int tH = tabBarHeight();
-    if (y >= tTop && y < tTop + tH && x >= margin && x < margin + w) {
-      activeTab = (x < margin + half) ? Tab::Games : Tab::Apps;
-      requestUpdate();
-      return;
+    const int gap = 6; const int tabW = (w-gap)/2;
+    if (ty >= tabBarTop() && ty < tabBarTop()+tabBarHeight()) {
+      if (tx >= margin && tx < margin+tabW) { activeTab=Tab::Games; requestUpdate(); return; }
+      if (tx >= margin+tabW+gap && tx < margin+tabW*2+gap) { activeTab=Tab::Apps; requestUpdate(); return; }
     }
-    const int rh = rowHeight();
-    const int top = listTop();
-    if (x >= margin && x < renderer.getScreenWidth() - margin && y >= top) {
-      const int idx = (y - top) / rh;
-      if (idx >= 0 && idx < count) {
-        sel = idx;
-        openSelected();
-      }
-    }
+    const int idx = indexAtPoint(tx, ty);
+    if (idx >= 0) { sel = idx; openSelectedIndex(idx); }
   }
 }
 
 void GamesActivity::render(RenderLock&&) {
+  if (optionPopup.processRender(renderer, mappedInput)) return;
+
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_GAMES));
@@ -217,41 +346,13 @@ void GamesActivity::render(RenderLock&&) {
   const int top = listTop();
   const int margin = std::max(16, metrics.contentSidePadding);
   const bool onGames = activeTab == Tab::Games;
-  const int count = currentCount();
+  const auto& vis = onGames ? visibleGames : visibleApps;
   const int sel = onGames ? selectedIndex : appSelectedIndex;
+  const int count = static_cast<int>(vis.size());
 
-  if (onGames) {
-    static const char* names[] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-    names[0] = "Chess";
-    names[1] = tr(STR_CONNECT_FOUR);
-    names[2] = tr(STR_MINESWEEPER);
-    names[3] = tr(STR_NONOGRAMS);
-    names[4] = tr(STR_SNAKE);
-    names[5] = tr(STR_SUDOKU);
-    static const uint8_t* icons[] = {ChessIcon.data(),      ConnectFourIcon.data(), MinesweeperIcon.data(),
-                                     NonogramsIcon.data(), SnakeIcon.data(),       SudokuIcon.data()};
-    for (int i = 0; i < count; ++i) {
-      const int y = top + i * rh;
-      if (y + rh > renderer.getScreenHeight() - metrics.buttonHintsHeight) break;
-      const bool selected = i == sel;
-      const int rowX = margin;
-      const int rowW = renderer.getScreenWidth() - margin * 2;
-      if (selected) {
-        renderer.drawRect(rowX, y, rowW, rh - 4, 2, true);
-        renderer.fillRect(rowX + 3, y + 3, 4, rh - 10);
-      } else {
-        renderer.drawRect(rowX, y, rowW, rh - 4);
-      }
-      const int iconSize = 32;
-      const int iconX = rowX + 14;
-      const int iconY = y + (rh - 4 - iconSize) / 2;
-      renderer.drawIcon(icons[i], iconX, iconY, iconSize);
-      const int textX = iconX + iconSize + 12;
-      const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
-      renderer.drawText(UI_12_FONT_ID, textX, textY, names[i], true);
-    }
+  if (count == 0) {
+    renderer.drawCenteredText(UI_12_FONT_ID, top + 20, "No items");
   } else {
-    static const char* appNames[] = {"Calculator", "Stopwatch"};
     for (int i = 0; i < count; ++i) {
       const int y = top + i * rh;
       if (y + rh > renderer.getScreenHeight() - metrics.buttonHintsHeight) break;
@@ -264,8 +365,32 @@ void GamesActivity::render(RenderLock&&) {
       } else {
         renderer.drawRect(rowX, y, rowW, rh - 4);
       }
+
+      const Item& item = onGames ? kGames[vis[i]] : kApps[vis[i]];
+      const bool pinned = isPinned(activeTab, item.id);
+      int textX = rowX + 16;
+      if (item.icon) {
+        const int iconSize = 32;
+        const int iconX = rowX + 14;
+        const int iconY = y + (rh - 4 - iconSize) / 2;
+        renderer.drawIcon(item.icon, iconX, iconY, iconSize);
+        textX = iconX + iconSize + 12;
+      }
+      const char* name = item.label;
+      if (onGames) {
+        if (std::string(item.id) == "chess") name = "Chess";
+        else if (std::string(item.id) == "connectfour") name = tr(STR_CONNECT_FOUR);
+        else if (std::string(item.id) == "minesweeper") name = tr(STR_MINESWEEPER);
+        else if (std::string(item.id) == "nonograms") name = tr(STR_NONOGRAMS);
+        else if (std::string(item.id) == "snake") name = tr(STR_SNAKE);
+        else if (std::string(item.id) == "sudoku") name = tr(STR_SUDOKU);
+      } else {
+        name = std::string(item.id) == "calculator" ? "Calculator" : "Stopwatch";
+      }
+      char buf[64];
+      if (pinned) snprintf(buf, sizeof(buf), "* %s", name); else snprintf(buf, sizeof(buf), "%s", name);
       const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
-      renderer.drawText(UI_12_FONT_ID, rowX + 16, textY, appNames[i], true);
+      renderer.drawText(UI_12_FONT_ID, textX, textY, buf, true);
     }
   }
 
