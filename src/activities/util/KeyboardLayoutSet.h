@@ -25,6 +25,8 @@ inline constexpr LayoutInfo ALL[] = {
     {freeink::ui::KeyboardLayoutId::CyrillicKk, Language::KK},
     {freeink::ui::KeyboardLayoutId::HebrewIl, Language::HE},
     {freeink::ui::KeyboardLayoutId::ArabicAr, Language::AR},
+    {freeink::ui::KeyboardLayoutId::SwedishSv, Language::SV},
+    {freeink::ui::KeyboardLayoutId::PersianFa, Language::FA},
 };
 inline constexpr uint8_t COUNT = sizeof(ALL) / sizeof(ALL[0]);
 static_assert(COUNT <= 16, "keyboard layout mask is uint16_t");
@@ -32,7 +34,7 @@ static_assert(COUNT <= 16, "keyboard layout mask is uint16_t");
 inline constexpr uint16_t bitAt(const uint8_t i) { return static_cast<uint16_t>(1u << i); }
 // Symbol layers have no Latin letters, so credentials and URLs require at
 // least one of these layouts to remain enabled.
-inline constexpr uint16_t LATIN_BITS = bitAt(0) | bitAt(1) | bitAt(2) | bitAt(3);
+inline constexpr uint16_t LATIN_BITS = bitAt(0) | bitAt(1) | bitAt(2) | bitAt(3) | bitAt(10); // EN,FR,DE,ES,SV
 
 uint16_t enabled();
 freeink::ui::KeyboardLayoutId startingLayout();
