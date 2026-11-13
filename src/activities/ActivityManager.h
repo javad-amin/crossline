@@ -20,7 +20,7 @@ class Activity;    // forward declaration
 struct ChapterResult;
 class RenderLock;  // forward declaration
 
-enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, SETTINGS_MENU };
+enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, GAMES_MENU, SETTINGS_MENU };
 
 /**
  * ActivityManager
@@ -98,6 +98,7 @@ class ActivityManager {
   void goToLibrary();
   void goToBrowser();
   void goToPlugins(bool showOpds);
+  void goToGames();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToReaderAtChapter(std::string path, ChapterResult chapter);
   void goToReaderAtPage(std::string path, uint32_t page);
