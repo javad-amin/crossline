@@ -12,6 +12,20 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+#include <cerrno>
+#include <cstdlib>
+
+namespace {
+double parseNumber(const std::string& s, bool& ok) {
+  if (s.empty() || s == "-" || s == "." || s == "-.") { ok = false; return 0.0; }
+  char* end = nullptr;
+  errno = 0;
+  const double v = std::strtod(s.c_str(), &end);
+  ok = (end != s.c_str() && *end == '\0' && errno == 0);
+  return ok ? v : 0.0;
+}
+}
+
 namespace {
 struct KeyDef { const char* label; };
 const KeyDef kKeys[20] = {
@@ -75,7 +89,7 @@ void CalculatorActivity::backspace() {
   if (display.size() > 1) display.pop_back();
   else display = "0";
   if (display == "-" || display.empty()) display = "0";
-  try { current = std::stod(display); } catch (...) { current = 0.0; display = "0"; }
+  { bool ok=false; current = parseNumber(display, ok); if (!ok) { current = 0.0; display = "0"; } }
 }
 
 void CalculatorActivity::pressDigit(int d) {
@@ -83,7 +97,7 @@ void CalculatorActivity::pressDigit(int d) {
   if (justEvaluated) { pendingOp = 0; pendingDisplay.clear(); display = "0"; justEvaluated = false; }
   if (!entering || display == "0") { display = ""; entering = true; }
   if (display.size() < 16) display += char('0' + d);
-  try { current = std::stod(display); } catch (...) {}
+  { bool ok=false; double v = parseNumber(display, ok); if (ok) current = v; }
 }
 
 void CalculatorActivity::calculate() {
@@ -111,7 +125,7 @@ void CalculatorActivity::pressOp(char op) {
       calculate();
       if (error) return;
     } else {
-      try { accumulator = entering ? std::stod(display) : current; } catch (...) { accumulator = current; }
+      if (entering) { bool ok=false; double v=parseNumber(display, ok); accumulator = ok ? v : current; } else { accumulator = current; }
     }
     pendingOp = op;
   }
@@ -147,7 +161,7 @@ void CalculatorActivity::handleKey(KeyId key) {
         if (entering || justEvaluated) {
           if (!display.empty() && display[0] == '-') display.erase(0,1);
           else if (display != "0") display = "-" + display;
-          try { current = std::stod(display); } catch (...) {}
+          { bool ok=false; double v = parseNumber(display, ok); if (ok) current = v; }
         } else { current = -current; accumulator = current; display = formatNumber(current); }
       }
       break;
@@ -162,7 +176,7 @@ void CalculatorActivity::handleKey(KeyId key) {
       if (error) break;
       if (pendingOp) {
         if (!entering) current = accumulator;
-        else { try { current = std::stod(display); } catch (...) {} }
+        else { bool ok=false; double v=parseNumber(display, ok); if (ok) current = v; }
         char buf[64];
         snprintf(buf, sizeof(buf), "%s %c %s =", formatNumber(accumulator).c_str(), pendingOp, formatNumber(current).c_str());
         pendingDisplay = buf;
@@ -170,7 +184,7 @@ void CalculatorActivity::handleKey(KeyId key) {
         pendingOp = 0;
         justEvaluated = true;
       } else {
-        try { current = std::stod(display); } catch (...) {}
+        { bool ok=false; double v = parseNumber(display, ok); if (ok) current = v; }
         display = formatNumber(current);
         justEvaluated = true;
       }
