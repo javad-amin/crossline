@@ -288,18 +288,20 @@ void SudokuActivity::loop() {
     chooseNumber(static_cast<uint8_t>(digit));
     return;
   }
-  const int controlsTop = controlButtonTop();
-  const int clearWidth = clearButtonWidth();
-  const int clearX = clearButtonLeft();
-  if (x >= clearX && x < clearX + clearWidth && y >= controlsTop && y < controlsTop + PENCIL_BUTTON_HEIGHT) {
+  const int padH = digitButtonSize() * 3;
+  const int btnW = pencilButtonWidth();
+  const int btnX = pencilButtonLeft();
+  const int gap = 8;
+  const int btnH = std::max(PENCIL_BUTTON_HEIGHT, (padH - gap) / 2);
+  const int pencilY = paletteTop();
+  const int clearY = pencilY + btnH + gap;
+  if (x >= btnX && x < btnX + btnW && y >= clearY && y < clearY + btnH) {
     chooseNumber(0);
     return;
   }
-  const int pencilY = controlsTop;
-  const int pencilWidth = pencilButtonWidth();
-  const int pencilX = pencilButtonLeft();
-  if (x >= pencilX && x < pencilX + pencilWidth && y >= pencilY && y < pencilY + PENCIL_BUTTON_HEIGHT) {
+  if (x >= btnX && x < btnX + btnW && y >= pencilY && y < pencilY + btnH) {
     pencilMode = !pencilMode;
+    saveProgress();
     requestUpdate();
   }
 }
@@ -308,13 +310,13 @@ int SudokuActivity::gridLeft() const { return (renderer.getScreenWidth() - gridS
 
 int SudokuActivity::gridTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  return metrics.topPadding + metrics.headerHeight + renderer.getLineHeight(UI_10_FONT_ID) * 2 + 12;
+  return metrics.topPadding + metrics.headerHeight + renderer.getLineHeight(UI_10_FONT_ID) * 2 + 14;
 }
 
 int SudokuActivity::gridSize() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int availableWidth = renderer.getScreenWidth() - 24;
-  const int bottomReserve = metrics.buttonHintsHeight + 160;
+  const int bottomReserve = metrics.buttonHintsHeight + 138;
   const int availableHeight = renderer.getScreenHeight() - gridTop() - bottomReserve;
   const int maximum = std::max(9, std::min(availableWidth, availableHeight));
   return maximum - maximum % sudoku::SIDE;
@@ -341,35 +343,47 @@ int SudokuActivity::startMenuTop() const {
 
 int SudokuActivity::paletteTop() const { return gridTop() + gridSize() + 8; }
 
-int SudokuActivity::digitButtonSize() const { return std::min(52, (renderer.getScreenWidth() - 24) / sudoku::SIDE); }
+int SudokuActivity::digitButtonSize() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 6;
+  const int maxPadH = bottom - paletteTop();
+  const int byH = maxPadH / 3;
+  const int margin = 12;
+  const int gap = 8;
+  // Leave room for a right rail, but prioritize large keypad for easy tapping
+  const int railMin = 64;
+  const int byW = (renderer.getScreenWidth() - margin * 2 - gap - railMin) / 3;
+  return std::max(30, std::min(byH, byW));
+}
 
-int SudokuActivity::controlButtonTop() const { return paletteTop() + digitButtonSize() + 14; }
+int SudokuActivity::controlButtonTop() const { return paletteTop(); }
 
-int SudokuActivity::pencilButtonLeft() const { return 12; }
+int SudokuActivity::pencilButtonLeft() const {
+  const int margin = 12;
+  const int gap = 8;
+  const int padW = digitButtonSize() * 3;
+  return margin + padW + gap;
+}
 
 int SudokuActivity::pencilButtonWidth() const {
-  constexpr int HORIZONTAL_PADDING = 24;
-  const int offLabelWidth = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_SUDOKU_PENCIL_OFF));
-  const int onLabelWidth = renderer.getTextWidth(UI_10_FONT_ID, tr(STR_SUDOKU_PENCIL_ON));
-  const int maxWidth = (renderer.getScreenWidth() - 24 - CONTROL_BUTTON_GAP) / 2;
-  return std::min(maxWidth, std::max(offLabelWidth, onLabelWidth) + HORIZONTAL_PADDING);
+  const int margin = 12;
+  return std::max(56, renderer.getScreenWidth() - margin - pencilButtonLeft());
 }
 
-int SudokuActivity::clearButtonLeft() const { return renderer.getScreenWidth() - 12 - clearButtonWidth(); }
+int SudokuActivity::clearButtonLeft() const { return pencilButtonLeft(); }
 
-int SudokuActivity::clearButtonWidth() const {
-  constexpr int HORIZONTAL_PADDING = 24;
-  const int maxWidth = (renderer.getScreenWidth() - 24 - CONTROL_BUTTON_GAP) / 2;
-  return std::min(maxWidth, renderer.getTextWidth(UI_10_FONT_ID, tr(STR_CLEAR_BUTTON)) + HORIZONTAL_PADDING);
-}
+int SudokuActivity::clearButtonWidth() const { return pencilButtonWidth(); }
 
 int SudokuActivity::digitAt(const int x, const int y) const {
   const int size = digitButtonSize();
-  const int width = size * sudoku::SIDE;
-  const int left = (renderer.getScreenWidth() - width) / 2;
+  const int margin = 12;
+  const int left = margin;
   const int top = paletteTop();
-  if (x < left || x >= left + width || y < top || y >= top + size) return -1;
-  return sudoku::digitForPaletteSlot((x - left) / size);
+  if (x < left || x >= left + size * 3 || y < top || y >= top + size * 3) return -1;
+  const int col = (x - left) / size;
+  const int row = (y - top) / size;
+  if (col < 0 || col > 2 || row < 0 || row > 2) return -1;
+  return row * 3 + col + 1;
 }
 
 void SudokuActivity::render(RenderLock&&) {
@@ -448,32 +462,34 @@ void SudokuActivity::drawBoard() {
     if (digit != 0) ++filled;
   }
   snprintf(progress, sizeof(progress), tr(STR_SUDOKU_PROGRESS), filled);
-  renderer.drawCenteredText(UI_10_FONT_ID, gridTop() - renderer.getLineHeight(UI_10_FONT_ID) - 2, progress);
-  renderer.drawCenteredText(UI_10_FONT_ID, gridTop() - renderer.getLineHeight(UI_10_FONT_ID) * 2 - 4,
+  renderer.drawCenteredText(UI_10_FONT_ID, gridTop() - renderer.getLineHeight(UI_10_FONT_ID) - 6, progress);
+  renderer.drawCenteredText(UI_10_FONT_ID, gridTop() - renderer.getLineHeight(UI_10_FONT_ID) * 2 - 10,
                             pencilMode ? tr(STR_SUDOKU_PENCIL_ON) : difficultyName(difficulty));
   drawGrid();
   drawNumberPalette();
   if (screen == Screen::NumberPicker) return;
+
+  const int size = digitButtonSize();
+  const int padH = size * 3;
   const int buttonWidth = pencilButtonWidth();
   const int x = pencilButtonLeft();
-  const int y = controlButtonTop();
-  if (pencilMode) {
-    renderer.fillRect(x, y, buttonWidth, PENCIL_BUTTON_HEIGHT);
-  } else {
-    renderer.drawRect(x, y, buttonWidth, PENCIL_BUTTON_HEIGHT, 2, true);
-  }
+  const int gap = 8;
+  const int btnH = std::max(PENCIL_BUTTON_HEIGHT, (padH - gap) / 2);
+  const int pencilY = paletteTop();
+  const int clearY = pencilY + btnH + gap;
+
+  if (pencilMode) renderer.fillRect(x, pencilY, buttonWidth, btnH);
+  else renderer.drawRect(x, pencilY, buttonWidth, btnH, 2, true);
   const char* pencilLabel = pencilMode ? tr(STR_SUDOKU_PENCIL_ON) : tr(STR_SUDOKU_PENCIL_OFF);
-  const int labelY = y + (PENCIL_BUTTON_HEIGHT - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+  const int pencilLabelY = pencilY + (btnH - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
   const int pencilLabelWidth = renderer.getTextWidth(UI_10_FONT_ID, pencilLabel);
-  renderer.drawText(UI_10_FONT_ID, x + (buttonWidth - pencilLabelWidth) / 2, labelY, pencilLabel, !pencilMode);
-  const int clearWidth = clearButtonWidth();
-  const int clearX = clearButtonLeft();
-  renderer.drawRect(clearX, y, clearWidth, PENCIL_BUTTON_HEIGHT, 2, true);
+  renderer.drawText(UI_10_FONT_ID, x + (buttonWidth - pencilLabelWidth) / 2, pencilLabelY, pencilLabel, !pencilMode);
+
+  renderer.drawRect(x, clearY, buttonWidth, btnH, 2, true);
   const char* clearLabel = tr(STR_CLEAR_BUTTON);
+  const int clearLabelY = clearY + (btnH - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
   const int clearLabelWidth = renderer.getTextWidth(UI_10_FONT_ID, clearLabel);
-  renderer.drawText(UI_10_FONT_ID, clearX + (clearWidth - clearLabelWidth) / 2, labelY, clearLabel);
-  renderer.drawCenteredText(UI_10_FONT_ID, y + PENCIL_BUTTON_HEIGHT + 4,
-                            mappedInput.hasTouch() ? tr(STR_SUDOKU_TOUCH_HELP) : tr(STR_SUDOKU_BUTTON_HELP));
+  renderer.drawText(UI_10_FONT_ID, x + (buttonWidth - clearLabelWidth) / 2, clearLabelY, clearLabel, true);
 }
 
 void SudokuActivity::drawGrid() {
@@ -549,27 +565,30 @@ void SudokuActivity::drawGrid() {
 
 void SudokuActivity::drawNumberPalette() {
   const int size = digitButtonSize();
-  const int width = size * sudoku::SIDE;
-  const int left = (renderer.getScreenWidth() - width) / 2;
+  const int margin = 12;
+  const int left = margin;
   const int top = paletteTop();
-  for (int slot = 0; slot < sudoku::SIDE; ++slot) {
-    const int digit = sudoku::digitForPaletteSlot(slot);
-    const int x = left + slot * size;
-    const bool selected = screen == Screen::NumberPicker && selectedDigit == digit;
-    if (selected)
-      renderer.fillRect(x, top, size, size);
-    else
-      renderer.drawRect(x, top, size, size);
-    char text[2] = {static_cast<char>('0' + digit), '\0'};
-    const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, text);
-    const int textHeight = renderer.getLineHeight(UI_12_FONT_ID);
-    renderer.drawText(UI_12_FONT_ID, x + (size - textWidth) / 2, top + (size - textHeight) / 2, text, !selected);
+  // 3x3 keypad inspired layout (1-9), large and left-aligned for easy tapping
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      const int digit = row * 3 + col + 1;
+      const int x = left + col * size;
+      const int y = top + row * size;
+      const bool selected = screen == Screen::NumberPicker && selectedDigit == static_cast<uint8_t>(digit);
+      if (selected) renderer.fillRect(x, y, size, size);
+      else renderer.drawRect(x, y, size, size, 2, true);
+      char text[2] = {static_cast<char>('0' + digit), '\0'};
+      const int font = (size >= 44) ? UI_12_FONT_ID : UI_10_FONT_ID;
+      const int textWidth = renderer.getTextWidth(font, text);
+      const int textHeight = renderer.getLineHeight(font);
+      renderer.drawText(font, x + (size - textWidth) / 2, y + (size - textHeight) / 2, text, !selected);
+    }
   }
 }
 
 void SudokuActivity::drawNumberPicker() {
-  const int y = controlButtonTop();
-  renderer.drawCenteredText(UI_10_FONT_ID, y + 6,
+  const int y = paletteTop() + digitButtonSize() * 3 + 4;
+  renderer.drawCenteredText(UI_10_FONT_ID, y,
                             selectedDigit == 0 ? tr(STR_CLEAR_BUTTON) : tr(STR_SUDOKU_PICK_NUMBER));
 }
 

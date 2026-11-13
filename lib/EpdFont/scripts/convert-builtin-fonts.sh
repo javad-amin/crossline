@@ -81,3 +81,6 @@ python fontconvert.py ubuntu_8_regular 8 \
 echo ""
 echo "Running compression verification..."
 python verify_compression.py ../builtinFonts/
+
+python fontconvert.py notes_hand_12 12 ../builtinFonts/source/PatrickHand/PatrickHand-Regular.ttf > ../builtinFonts/notes_hand_12_regular.h
+echo "Generated ../builtinFonts/notes_hand_12_regular.h"

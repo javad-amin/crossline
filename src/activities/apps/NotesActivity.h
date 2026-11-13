@@ -15,7 +15,9 @@ class NotesActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class View : uint8_t { List, Note };
+  enum class View : uint8_t { List, Note, Settings };
+  enum class NotesTheme : uint8_t { Normal = 0, Notebook = 1 };
+  enum class NotesFont : uint8_t { UI = 0, Small = 1, Handwriting = 2 };
 
   struct NoteEntry {
     std::string name;
@@ -30,6 +32,7 @@ class NotesActivity final : public Activity {
   };
 
   static constexpr const char* kNotesDir = "/.crosspoint/notes";
+  static constexpr const char* kNotesSettingsPath = "/.crosspoint/notes_app.json";
 
   bool ensureNotesDir() const;
   void scanNotes();
@@ -38,9 +41,12 @@ class NotesActivity final : public Activity {
   bool saveOpenNote();
   void rebuildLines();
   std::string notePath(const std::string& name) const;
+  void loadSettings();
+  void saveSettings() const;
 
   void renderList() const;
   void renderNote() const;
+  void renderSettings() const;
   int listRowHeight() const;
   int noteRowHeight() const;
   int listTop() const;
@@ -58,6 +64,9 @@ class NotesActivity final : public Activity {
   void showLineOptions(int idx);
 
   View view = View::List;
+  NotesTheme notesTheme = NotesTheme::Notebook;
+  NotesFont notesFont = NotesFont::Handwriting;
+  int settingsIndex = 0; // 0 theme, 1 font
   std::vector<NoteEntry> notes;
   int listIndex = 0;
 

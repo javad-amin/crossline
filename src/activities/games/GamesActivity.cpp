@@ -186,7 +186,7 @@ int GamesActivity::tabBarTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   return metrics.topPadding + metrics.headerHeight;
 }
-int GamesActivity::rowHeight() const { return std::max(44, renderer.getLineHeight(UI_12_FONT_ID) + 20); }
+int GamesActivity::rowHeight() const { return std::max(44, renderer.getLineHeight(UI_12_FONT_ID) + 20) + 10; }
 int GamesActivity::listTop() const { return tabBarTop() + tabBarHeight() + 8; }
 
 void GamesActivity::drawTabs() const {
@@ -502,11 +502,12 @@ void GamesActivity::render(RenderLock&&) {
         const bool selected = i == hiddenListIndex;
         const int rowX = margin;
         const int rowW = renderer.getScreenWidth() - margin * 2;
+        const int boxH = std::max(44, renderer.getLineHeight(UI_12_FONT_ID) + 20);
         if (selected) {
-          renderer.drawRect(rowX, y, rowW, rh - 4, 2, true);
-          renderer.fillRect(rowX + 3, y + 3, 4, rh - 10);
+          renderer.drawRect(rowX, y, rowW, boxH, 2, true);
+          renderer.fillRect(rowX + 3, y + 3, 4, boxH - 6);
         } else {
-          renderer.drawRect(rowX, y, rowW, rh - 4);
+          renderer.drawRect(rowX, y, rowW, boxH);
         }
         std::string name = hv[i];
         if (onGames) {
@@ -523,7 +524,7 @@ void GamesActivity::render(RenderLock&&) {
         }
         char buf[64];
         snprintf(buf, sizeof(buf), "Unhide: %s", name.c_str());
-        const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+        const int textY = y + (boxH - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
         renderer.drawText(UI_12_FONT_ID, rowX + 16, textY, buf, true);
       }
     }
@@ -541,11 +542,12 @@ void GamesActivity::render(RenderLock&&) {
         const bool selected = i == sel;
         const int rowX = margin;
         const int rowW = renderer.getScreenWidth() - margin * 2;
+        const int boxH = std::max(44, renderer.getLineHeight(UI_12_FONT_ID) + 20);
         if (selected) {
-          renderer.drawRect(rowX, y, rowW, rh - 4, 2, true);
-          renderer.fillRect(rowX + 3, y + 3, 4, rh - 10);
+          renderer.drawRect(rowX, y, rowW, boxH, 2, true);
+          renderer.fillRect(rowX + 3, y + 3, 4, boxH - 6);
         } else {
-          renderer.drawRect(rowX, y, rowW, rh - 4);
+          renderer.drawRect(rowX, y, rowW, boxH);
         }
 
         const Item& item = onGames ? kGames[vis[i]] : kApps[vis[i]];
@@ -554,7 +556,7 @@ void GamesActivity::render(RenderLock&&) {
         if (item.icon) {
           const int iconSize = 32;
           const int iconX = rowX + 14;
-          const int iconY = y + (rh - 4 - iconSize) / 2;
+          const int iconY = y + (boxH - iconSize) / 2;
           renderer.drawIcon(item.icon, iconX, iconY, iconSize);
           textX = iconX + iconSize + 12;
         }
@@ -573,7 +575,7 @@ void GamesActivity::render(RenderLock&&) {
         }
         char buf[64];
         if (pinned) snprintf(buf, sizeof(buf), "* %s", name); else snprintf(buf, sizeof(buf), "%s", name);
-        const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+        const int textY = y + (boxH - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
         renderer.drawText(UI_12_FONT_ID, textX, textY, buf, true);
       }
     }

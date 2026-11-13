@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <ArduinoJson.h>
 #include <I18n.h>
 #include <Logging.h>
 
@@ -53,6 +54,7 @@ NotesActivity::NotesActivity(GfxRenderer& renderer, MappedInputManager& mappedIn
 
 void NotesActivity::onEnter() {
   Activity::onEnter();
+  loadSettings();
   ensureNotesDir();
   scanNotes();
   requestUpdate();
@@ -68,6 +70,38 @@ bool NotesActivity::ensureNotesDir() const {
 std::string NotesActivity::notePath(const std::string& name) const {
   return std::string(kNotesDir) + "/" + name + ".md";
 }
+
+void NotesActivity::loadSettings() {
+  notesTheme = NotesTheme::Notebook;
+  notesFont = NotesFont::Handwriting;
+  if (!Storage.exists(kNotesSettingsPath)) return;
+  char buf[256];
+  const size_t n = Storage.readFileToBuffer(kNotesSettingsPath, buf, sizeof(buf) - 1);
+  if (n == 0) return;
+  buf[n] = '\0';
+  JsonDocument doc;
+  if (deserializeJson(doc, buf)) return;
+  const char* theme = doc["theme"] | "notebook";
+  if (strcmp(theme, "normal") == 0) notesTheme = NotesTheme::Normal;
+  else notesTheme = NotesTheme::Notebook;
+  const char* font = doc["font"] | "handwriting";
+  if (strcmp(font, "ui") == 0) notesFont = NotesFont::UI;
+  else if (strcmp(font, "small") == 0) notesFont = NotesFont::Small;
+  else notesFont = NotesFont::Handwriting;
+}
+
+void NotesActivity::saveSettings() const {
+  JsonDocument doc;
+  doc["theme"] = (notesTheme == NotesTheme::Notebook) ? "notebook" : "normal";
+  const char* font = "handwriting";
+  if (notesFont == NotesFont::UI) font = "ui";
+  else if (notesFont == NotesFont::Small) font = "small";
+  doc["font"] = font;
+  char out[160];
+  const size_t n = serializeJson(doc, out, sizeof(out));
+  if (n > 0) Storage.writeFile(kNotesSettingsPath, String(out));
+}
+
 
 void NotesActivity::scanNotes() {
   notes.clear();
@@ -211,7 +245,12 @@ bool NotesActivity::saveOpenNote() {
 }
 
 int NotesActivity::listRowHeight() const { return std::max(44, renderer.getLineHeight(UI_12_FONT_ID) + 18); }
-int NotesActivity::noteRowHeight() const { return std::max(40, renderer.getLineHeight(UI_10_FONT_ID) + 16); }
+int NotesActivity::noteRowHeight() const {
+  int fontId = NOTES_HAND_12_FONT_ID;
+  if (notesFont == NotesFont::UI) fontId = UI_10_FONT_ID;
+  else if (notesFont == NotesFont::Small) fontId = SMALL_FONT_ID;
+  return std::max(40, renderer.getLineHeight(fontId) + 16);
+}
 int NotesActivity::listTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   return metrics.topPadding + metrics.headerHeight + 6;
@@ -406,7 +445,9 @@ void NotesActivity::loop() {
   if (view == View::List) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) { finish(); return; }
     const int count = static_cast<int>(notes.size());
-    const int total = count + 1; // + New note
+    const int newIdx = count;
+    const int settingsIdx = count + 1;
+    const int total = count + 2; // + New note, + Settings
     if (mappedInput.wasReleased(MappedInputManager::Button::Up)) { listIndex = (listIndex + total - 1) % total; requestUpdate(); return; }
     if (mappedInput.wasReleased(MappedInputManager::Button::Down)) { listIndex = (listIndex + 1) % total; requestUpdate(); return; }
 
@@ -435,7 +476,8 @@ void NotesActivity::loop() {
     } else { touchHoldIndex = -1; touchHoldFired = false; }
 
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (listIndex == count) createNotePrompt();
+      if (listIndex == newIdx) createNotePrompt();
+      else if (listIndex == settingsIdx) { view = View::Settings; settingsIndex = 0; requestUpdate(); }
       else openNote(listIndex);
       return;
     }
@@ -469,9 +511,51 @@ void NotesActivity::loop() {
         const int idx = (ty - top) / rh;
         if (idx >= 0 && idx < total) {
           listIndex = idx;
-          if (listIndex == count) createNotePrompt();
+          if (listIndex == newIdx) createNotePrompt();
+          else if (listIndex == settingsIdx) { view = View::Settings; settingsIndex = 0; requestUpdate(); }
           else openNote(listIndex);
         }
+      }
+    }
+    return;
+  }
+
+  if (view == View::Settings) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) { view = View::List; requestUpdate(); return; }
+    const int total = 2; // Theme, Font
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up)) { settingsIndex = (settingsIndex + total - 1) % total; requestUpdate(); return; }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Down)) { settingsIndex = (settingsIndex + 1) % total; requestUpdate(); return; }
+
+    auto cycleTheme = [this]() {
+      notesTheme = (notesTheme == NotesTheme::Notebook) ? NotesTheme::Normal : NotesTheme::Notebook;
+      saveSettings();
+      requestUpdate();
+    };
+    auto cycleFont = [this]() {
+      if (notesFont == NotesFont::Handwriting) notesFont = NotesFont::UI;
+      else if (notesFont == NotesFont::UI) notesFont = NotesFont::Small;
+      else notesFont = NotesFont::Handwriting;
+      saveSettings();
+      requestUpdate();
+    };
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Left) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      if (settingsIndex == 0) cycleTheme();
+      else cycleFont();
+      return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const int top = listTop();
+      const int rh = listRowHeight();
+      const int margin = std::max(16, metrics.contentSidePadding);
+      if (tx >= margin && tx < renderer.getScreenWidth() - margin && ty >= top) {
+        const int idx = (ty - top) / rh;
+        if (idx == 0) { settingsIndex = 0; cycleTheme(); }
+        else if (idx == 1) { settingsIndex = 1; cycleFont(); }
       }
     }
     return;
@@ -564,7 +648,9 @@ void NotesActivity::loop() {
 void NotesActivity::render(RenderLock&&) {
   if (optionPopup.processRender(renderer, mappedInput)) return;
   renderer.clearScreen();
-  if (view == View::List) renderList(); else renderNote();
+  if (view == View::List) renderList();
+  else if (view == View::Note) renderNote();
+  else renderSettings();
   renderer.displayBuffer();
 }
 
@@ -575,7 +661,9 @@ void NotesActivity::renderList() const {
   const int rh = listRowHeight();
   const int margin = std::max(16, metrics.contentSidePadding);
   const int count = static_cast<int>(notes.size());
-  const int total = count + 1;
+  const int newIdx = count;
+  const int settingsIdx = count + 1;
+  const int total = count + 2;
   const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 4;
   for (int i = 0; i < total; ++i) {
     const int y = top + i * rh;
@@ -587,8 +675,10 @@ void NotesActivity::renderList() const {
     else renderer.drawRect(rowX, y, rowW, rh - 4);
     const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
     char buf[96];
-    if (i == count) {
+    if (i == newIdx) {
       snprintf(buf, sizeof(buf), "+ New note");
+    } else if (i == settingsIdx) {
+      snprintf(buf, sizeof(buf), "Settings  (%s)", notesTheme == NotesTheme::Notebook ? "Notebook" : "Normal");
     } else {
       if (notes[i].total > 0) snprintf(buf, sizeof(buf), "%s  (%d/%d)", notes[i].name.c_str(), notes[i].done, notes[i].total);
       else snprintf(buf, sizeof(buf), "%s", notes[i].name.c_str());
@@ -604,30 +694,141 @@ void NotesActivity::renderNote() const {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, openName.c_str());
   const int top = listTop();
   const int rh = noteRowHeight();
-  const int margin = std::max(16, metrics.contentSidePadding);
+  const int margin = std::max(20, metrics.contentSidePadding);
   const int lineCount = static_cast<int>(lines.size());
   const int total = lineCount + 1;
   const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 4;
-  for (int i = 0; i < total; ++i) {
+  const int contentW = renderer.getScreenWidth() - margin * 2;
+  const bool notebook = (notesTheme == NotesTheme::Notebook);
+  int textFont = NOTES_HAND_12_FONT_ID;
+  if (notesFont == NotesFont::UI) textFont = UI_10_FONT_ID;
+  else if (notesFont == NotesFont::Small) textFont = SMALL_FONT_ID;
+  else textFont = NOTES_HAND_12_FONT_ID;
+
+  if (notebook) {
+    const int pageX = margin - 10;
+    const int pageW = contentW + 20;
+    const int marginLineX = pageX + 26;
+    const int textBaseX = marginLineX + 10;
+    for (int yLine = top + rh - 4; yLine < bottom; yLine += rh) {
+      renderer.drawLine(pageX, yLine, pageX + pageW, yLine, true);
+    }
+    renderer.drawLine(marginLineX, top, marginLineX, bottom - 2, true);
+    renderer.drawLine(marginLineX + 2, top, marginLineX + 2, bottom - 2, true);
+
+    for (int i = 0; i < total; ++i) {
+      const int y = top + i * rh;
+      if (y + rh > bottom) break;
+      const bool selected = i == noteIndex;
+      const int textY = y + (rh - renderer.getLineHeight(textFont)) / 2;
+      if (selected) {
+        renderer.fillRect(pageX + 4, y + 6, 10, 3);
+        renderer.fillRect(pageX + 4, y + rh - 12, 10, 3);
+      }
+      if (i == lineCount) {
+        renderer.drawText(textFont, textBaseX, textY, "+ Add line", true);
+        continue;
+      }
+      const auto& l = lines[i];
+      int textX = textBaseX;
+      if (l.isTask) {
+        const int cb = 14;
+        const int cbX = textBaseX;
+        const int cbY = y + (rh - cb) / 2 - 1;
+        renderer.drawRect(cbX, cbY, cb, cb);
+        if (l.checked) {
+          renderer.drawLine(cbX + 3, cbY + 7, cbX + 6, cbY + 10, true);
+          renderer.drawLine(cbX + 6, cbY + 10, cbX + 11, cbY + 3, true);
+        }
+        textX = cbX + cb + 10;
+      }
+      std::string s = l.text;
+      if (!l.isTask && trimLine(s).empty()) s = "";
+      if (!s.empty()) {
+        const int maxW = pageX + pageW - textX - 6;
+        while (!s.empty() && renderer.getTextWidth(textFont, s.c_str()) > maxW) {
+          if (s.size() > 3) s.resize(s.size() - 4);
+          else { s.clear(); break; }
+          s += "...";
+        }
+        if (!s.empty()) renderer.drawText(textFont, textX, textY, s.c_str(), true);
+      }
+    }
+  } else {
+    const int rowX = margin;
+    for (int i = 0; i < total; ++i) {
+      const int y = top + i * rh;
+      if (y + rh > bottom) break;
+      const bool selected = i == noteIndex;
+      const int textY = y + (rh - renderer.getLineHeight(textFont)) / 2;
+      if (selected) {
+        renderer.fillRect(rowX - 8, y + 4, 3, rh - 8);
+      }
+      if (i == lineCount) {
+        renderer.drawText(textFont, rowX, textY, "+ Add line", true);
+        continue;
+      }
+      const auto& l = lines[i];
+      int textX = rowX;
+      if (l.isTask) {
+        const int cb = 14;
+        const int cbX = rowX;
+        const int cbY = y + (rh - cb) / 2 - 1;
+        renderer.drawRect(cbX, cbY, cb, cb);
+        if (l.checked) {
+          renderer.drawLine(cbX + 3, cbY + 7, cbX + 6, cbY + 10, true);
+          renderer.drawLine(cbX + 6, cbY + 10, cbX + 11, cbY + 3, true);
+        }
+        textX = cbX + cb + 10;
+      }
+      std::string s = l.text;
+      if (!l.isTask && trimLine(s).empty()) s = "";
+      if (!s.empty()) {
+        const int maxW = rowX + contentW - textX;
+        while (!s.empty() && renderer.getTextWidth(textFont, s.c_str()) > maxW) {
+          if (s.size() > 3) s.resize(s.size() - 4);
+          else { s.clear(); break; }
+          s += "...";
+        }
+        if (!s.empty()) renderer.drawText(textFont, textX, textY, s.c_str(), true);
+      }
+    }
+  }
+
+  GUI.drawButtonHints(renderer, tr(STR_BACK), tr(STR_SELECT), "Rename", "Delete note");
+}
+
+
+void NotesActivity::renderSettings() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, "Notes Settings");
+  const int top = listTop();
+  const int rh = listRowHeight();
+  const int margin = std::max(16, metrics.contentSidePadding);
+
+  const char* themeName = (notesTheme == NotesTheme::Notebook) ? "Notebook" : "Normal";
+  const char* fontName = "Handwriting";
+  if (notesFont == NotesFont::UI) fontName = "UI";
+  else if (notesFont == NotesFont::Small) fontName = "Small";
+
+  char rows[2][80];
+  snprintf(rows[0], sizeof(rows[0]), "Theme: %s", themeName);
+  snprintf(rows[1], sizeof(rows[1]), "Font: %s", fontName);
+
+  for (int i = 0; i < 2; ++i) {
     const int y = top + i * rh;
-    if (y + rh > bottom) break;
-    const bool selected = i == noteIndex;
+    const bool selected = i == settingsIndex;
     const int rowX = margin;
     const int rowW = renderer.getScreenWidth() - margin * 2;
     if (selected) renderer.fillRect(rowX, y, rowW, rh - 4);
     else renderer.drawRect(rowX, y, rowW, rh - 4);
-    const int textY = y + (rh - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
-    char buf[160];
-    if (i == lineCount) {
-      snprintf(buf, sizeof(buf), "+ Add line");
-    } else {
-      const auto& l = lines[i];
-      if (l.isTask) snprintf(buf, sizeof(buf), "[%c] %s", l.checked ? 'x' : ' ', l.text.c_str());
-      else snprintf(buf, sizeof(buf), "%s", l.text.empty() ? "(empty line)" : l.text.c_str());
-    }
-    std::string s(buf);
-    if (s.size() > 60) s = s.substr(0, 57) + "...";
-    renderer.drawText(UI_10_FONT_ID, rowX + 10, textY, s.c_str(), !selected);
+    const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+    renderer.drawText(UI_12_FONT_ID, rowX + 12, textY, rows[i], !selected);
   }
-  GUI.drawButtonHints(renderer, tr(STR_BACK), tr(STR_SELECT), "Rename", "Delete note");
+
+  const char* hint = (settingsIndex == 0) ? "Change theme" : "Change font";
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  (void)labels;
+  GUI.drawButtonHints(renderer, tr(STR_BACK), "Change", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  (void)hint;
 }

@@ -502,48 +502,93 @@ void ConnectFourActivity::drawDifficultySelect() const {
 
 void ConnectFourActivity::drawBoard() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int top = metrics.topPadding + metrics.headerHeight + 30;
-  const int availW = renderer.getScreenWidth() - 24;
-  const int availH = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - 16;
-  const int cell = std::max(18, std::min(availW / COLS, availH / (ROWS + 1)));
+  const int top = metrics.topPadding + metrics.headerHeight + 20;
+  const int availW = renderer.getScreenWidth() - 32;
+  const int availH = renderer.getScreenHeight() - top - metrics.buttonHintsHeight - 24;
+  const int lipH = 22;
+  const int cell = std::max(20, std::min(availW / COLS, (availH - lipH) / ROWS));
   const int boardW = cell * COLS;
   const int boardH = cell * ROWS;
   const int left = (renderer.getScreenWidth() - boardW) / 2;
-  const int gridTop = top + cell;
+  const int lipTop = top;
+  const int gridTop = lipTop + lipH;
+  const int frame = 4;
 
-  const int cx = left + cursorCol * cell + cell / 2;
-  renderer.drawText(UI_10_FONT_ID, cx - 3, top, "v");
+  // Board frame/slab (CrossPlay-inspired: framed dithered slab with holes/discs)
+  renderer.drawRect(left - frame, lipTop - frame, boardW + frame * 2, boardH + lipH + frame * 2, 2, true);
+  renderer.fillRectDither(left, lipTop, boardW, boardH + lipH, Color::LightGray);
+  renderer.drawLine(left, gridTop, left + boardW, gridTop, true);
+
+  // Lip row: show waiting disc above selected column when it is the player's move
+  const bool canDropNow = (state == State::Playing) && !aiThinking &&
+                          (mode == Mode::PvP || (mode == Mode::VsAI && current == Cell::P1));
+  if (canDropNow) {
+    const Cell preview = (mode == Mode::PvP) ? current : Cell::P1;
+    const int cx = left + cursorCol * cell + cell / 2;
+    const int cy = lipTop + lipH / 2;
+    const int r = std::max(5, cell / 2 - 6);
+    if (preview == Cell::P2) {
+      renderer.fillRoundedRect(cx - r, cy - r, r * 2, r * 2, r, Color::Black);
+    } else {
+      const int ir = std::max(2, r - 4);
+      renderer.fillRoundedRect(cx - r, cy - r, r * 2, r * 2, r, Color::LightGray);
+      renderer.drawRoundedRect(cx - r, cy - r, r * 2, r * 2, 2, r, true);
+      renderer.drawRoundedRect(cx - ir, cy - ir, ir * 2, ir * 2, 1, ir, true);
+    }
+  } else {
+    // subtle cursor marker when not actively dropping
+    const int cx = left + cursorCol * cell + cell / 2;
+    renderer.fillRoundedRect(cx - 4, lipTop + lipH / 2 - 4, 8, 8, 4, Color::DarkGray);
+  }
 
   for (int r = 0; r < ROWS; ++r) {
     for (int c = 0; c < COLS; ++c) {
       const int x = left + c * cell;
       const int y = gridTop + r * cell;
-      renderer.drawRect(x, y, cell, cell);
+      const int cx = x + cell / 2;
+      const int cy = y + cell / 2;
+      const int holeR = std::max(6, cell / 2 - 4);
+      const int discR = std::max(5, holeR - 1);
+
+      // Hole
+      renderer.fillRoundedRect(cx - holeR, cy - holeR, holeR * 2, holeR * 2, holeR, Color::White);
+      renderer.drawRoundedRect(cx - holeR, cy - holeR, holeR * 2, holeR * 2, 1, holeR, true);
+
       const Cell v = board[r * COLS + c];
-      if (v == Cell::P1 || v == Cell::P2) {
-        const char* chip = (v == Cell::P1) ? "X" : "O";
-        const int tw = renderer.getTextWidth(UI_12_FONT_ID, chip);
-        const int th = renderer.getLineHeight(UI_12_FONT_ID);
-        renderer.drawText(UI_12_FONT_ID, x + (cell - tw) / 2, y + (cell - th) / 2, chip);
+      if (v == Cell::P1) {
+        // Player 1: medium-light disc with double rim (distinct from board)
+        const int innerR = std::max(3, discR - 5);
+        renderer.fillRoundedRect(cx - discR, cy - discR, discR * 2, discR * 2, discR, Color::LightGray);
+        renderer.drawRoundedRect(cx - discR, cy - discR, discR * 2, discR * 2, 3, discR, true);
+        renderer.drawRoundedRect(cx - innerR, cy - innerR, innerR * 2, innerR * 2, 2, innerR, true);
+      } else if (v == Cell::P2) {
+        // Player 2 / dark disc: solid black
+        renderer.fillRoundedRect(cx - discR, cy - discR, discR * 2, discR * 2, discR, Color::Black);
       }
     }
   }
 
-  const int statusY = gridTop + boardH + 8;
+  // Column guides (subtle)
+  for (int c = 1; c < COLS; ++c) {
+    const int x = left + c * cell;
+    renderer.drawLine(x, gridTop, x, gridTop + boardH, true);
+  }
+
+  const int statusY = gridTop + boardH + 10;
   if (state == State::P1Win) {
-    renderer.drawCenteredText(UI_12_FONT_ID, statusY, mode == Mode::PvP ? "Player X wins!" : tr(STR_CONNECT_FOUR_WIN));
+    renderer.drawCenteredText(UI_12_FONT_ID, statusY, mode == Mode::PvP ? "Player 1 wins!" : tr(STR_CONNECT_FOUR_WIN));
   } else if (state == State::P2Win) {
-    renderer.drawCenteredText(UI_12_FONT_ID, statusY, mode == Mode::PvP ? "Player O wins!" : tr(STR_CONNECT_FOUR_LOSE));
+    renderer.drawCenteredText(UI_12_FONT_ID, statusY, mode == Mode::PvP ? "Player 2 wins!" : tr(STR_CONNECT_FOUR_LOSE));
   } else if (state == State::Draw) {
     renderer.drawCenteredText(UI_12_FONT_ID, statusY, tr(STR_CONNECT_FOUR_DRAW));
   } else if (mode == Mode::PvP) {
-    renderer.drawCenteredText(UI_10_FONT_ID, statusY, current == Cell::P1 ? "Turn: X" : "Turn: O");
+    renderer.drawCenteredText(UI_10_FONT_ID, statusY, current == Cell::P1 ? "Turn: Player 1" : "Turn: Player 2");
   } else if (aiThinking) {
     renderer.drawCenteredText(UI_12_FONT_ID, statusY, "Thinking...");
   } else {
     const char* diff = difficulty == Difficulty::Easy ? tr(STR_SUDOKU_EASY) : (difficulty == Difficulty::Normal ? tr(STR_SUDOKU_NORMAL) : tr(STR_SUDOKU_HARD));
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Difficulty: %s", diff);
+    char buf[48];
+    snprintf(buf, sizeof(buf), "You vs Computer (%s)", diff);
     renderer.drawCenteredText(SMALL_FONT_ID, statusY, buf);
   }
 }
