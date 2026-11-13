@@ -10,7 +10,7 @@ class GamesActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class GameChoice : uint8_t { Sudoku = 0, Snake, Minesweeper, Nonograms, ConnectFour, Count };
+  enum class GameChoice : uint8_t { Sudoku = 0, Snake, Minesweeper, Nonograms, ConnectFour, Chess, Count };
 
   void openSelected();
   int listTop() const;

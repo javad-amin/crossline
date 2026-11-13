@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "ConnectFourActivity.h"
+#include "chess/ChessActivity.h"
 #include "MappedInputManager.h"
 #include "MinesweeperActivity.h"
 #include "NonogramsActivity.h"
@@ -47,6 +48,11 @@ void GamesActivity::openSelected() {
     }
     case GameChoice::ConnectFour: {
       auto activity = makeUniqueNoThrow<ConnectFourActivity>(renderer, mappedInput);
+      if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
+      return;
+    }
+    case GameChoice::Chess: {
+      auto activity = makeUniqueNoThrow<ChessActivity>(renderer, mappedInput);
       if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
       return;
     }
@@ -108,13 +114,14 @@ void GamesActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_GAMES));
 
   static const char* names[] = {
-      nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
   };
   names[0] = tr(STR_SUDOKU);
   names[1] = tr(STR_SNAKE);
   names[2] = tr(STR_MINESWEEPER);
   names[3] = tr(STR_NONOGRAMS);
   names[4] = tr(STR_CONNECT_FOUR);
+  names[5] = "Chess";
 
   const int rh = rowHeight();
   const int top = listTop();
