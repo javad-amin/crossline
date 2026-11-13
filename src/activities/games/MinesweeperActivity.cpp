@@ -291,7 +291,7 @@ void MinesweeperActivity::drawBoard() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   if (screen != Screen::Result) {
     char status[64];
-    snprintf(status, sizeof(status), "%s: %d  %s: %d/%d", tr(STR_MINESWEEPER_MINES), board.cfg.mines,
+    snprintf(status, sizeof(status), "%s: %d   %s: %d/%d", tr(STR_MINESWEEPER_MINES), board.cfg.mines,
              tr(STR_MINESWEEPER_FLAGS), minesweeper::flaggedCount(board), board.cfg.mines);
     renderer.drawCenteredText(UI_10_FONT_ID, metrics.topPadding + metrics.headerHeight + 4, status);
   }
@@ -299,37 +299,54 @@ void MinesweeperActivity::drawBoard() {
   const int cs = cellSize();
   const int bl = boardLeft();
   const int bt = boardTop();
+  const int bw = cs * board.cfg.w;
+  const int bh = cs * board.cfg.h;
+  renderer.drawRect(bl - 2, bt - 2, bw + 4, bh + 4, 2, true);
+
   for (int y = 0; y < board.cfg.h; ++y) {
     for (int x = 0; x < board.cfg.w; ++x) {
       const int i = board.idx(x, y);
       const int px = bl + x * cs;
       const int py = bt + y * cs;
       const bool cursor = (x == cursorX && y == cursorY);
-      if (board.revealed[i]) {
-        if (board.mine[i]) renderer.fillRect(px, py, cs, cs);
-        else renderer.drawRect(px, py, cs, cs);
+      const bool revealed = board.revealed[i] != 0;
+      const bool mine = board.mine[i] != 0;
+      const bool flagged = board.flagged[i] != 0;
+
+      if (revealed) {
+        if (mine) {
+          renderer.fillRect(px + 1, py + 1, cs - 1, cs - 1);
+        } else {
+          renderer.fillRect(px + 1, py + 1, cs - 1, cs - 1, false);
+        }
       } else {
-        renderer.fillRectDither(px, py, cs, cs, Color::LightGray);
-        renderer.drawRect(px, py, cs, cs);
+        renderer.fillRectDither(px + 1, py + 1, cs - 1, cs - 1, Color::LightGray);
       }
-      if (board.revealed[i] && !board.mine[i] && board.adjacent[i] > 0) {
+      renderer.drawRect(px, py, cs, cs, true);
+
+      const int cx = px + cs / 2;
+      const int cy = py + cs / 2;
+
+      if (revealed && mine) {
+        const int r = std::max(2, cs / 6);
+        renderer.fillRect(cx - r, cy - r / 2, r * 2, r, false);
+        renderer.fillRect(cx - r / 2, cy - r, r, r * 2, false);
+        renderer.drawPixel(cx, cy, false);
+      } else if (!revealed && flagged) {
+        const int poleX = cx - 1;
+        renderer.fillRect(poleX, cy - cs / 4, 2, cs / 2, true);
+        renderer.fillRect(poleX + 2, cy - cs / 4, std::max(3, cs / 4), std::max(3, cs / 5), true);
+        renderer.fillRect(cx - 3, cy + cs / 6, 6, 2, true);
+      } else if (revealed && !mine && board.adjacent[i] > 0) {
         char num[2] = {static_cast<char>('0' + board.adjacent[i]), '\0'};
-        const int tw = renderer.getTextWidth(SMALL_FONT_ID, num);
-        const int th = renderer.getLineHeight(SMALL_FONT_ID);
-        renderer.drawText(SMALL_FONT_ID, px + (cs - tw) / 2, py + (cs - th) / 2, num);
-      } else if (board.flagged[i] && !board.revealed[i]) {
-        const char* mark = "F";
-        const int tw = renderer.getTextWidth(SMALL_FONT_ID, mark);
-        const int th = renderer.getLineHeight(SMALL_FONT_ID);
-        renderer.drawText(SMALL_FONT_ID, px + (cs - tw) / 2, py + (cs - th) / 2, mark);
-      } else if (board.revealed[i] && board.mine[i]) {
-        const char* mark = "*";
-        const int tw = renderer.getTextWidth(SMALL_FONT_ID, mark);
-        const int th = renderer.getLineHeight(SMALL_FONT_ID);
-        renderer.drawText(SMALL_FONT_ID, px + (cs - tw) / 2, py + (cs - th) / 2, mark);
+        const int font = (cs >= 28) ? UI_10_FONT_ID : SMALL_FONT_ID;
+        const int tw = renderer.getTextWidth(font, num);
+        const int th = renderer.getLineHeight(font);
+        renderer.drawText(font, px + (cs - tw) / 2, py + (cs - th) / 2, num);
       }
+
       if (cursor) {
-        renderer.drawRect(px, py, cs, cs, 3, true);
+        renderer.drawRect(px + 1, py + 1, cs - 2, cs - 2, 2, true);
       }
     }
   }

@@ -487,17 +487,22 @@ void SudokuActivity::drawGrid() {
       const int x = left + column * cellSize;
       const int y = top + row * cellSize;
       const bool selected = row == selectedRow && column == selectedColumn;
-      if (selected)
+      const bool given = puzzle.givens[cell] != 0;
+      if (selected) {
         renderer.fillRect(x, y, cellSize, cellSize);
-      else if (puzzle.givens[cell] != 0)
+      } else if (given) {
         renderer.fillRectDither(x, y, cellSize, cellSize, Color::LightGray);
+      } else {
+        renderer.fillRect(x, y, cellSize, cellSize, false);
+      }
+
       const uint8_t digit = entries[cell];
       if (digit != 0) {
         char text[2] = {static_cast<char>('0' + digit), '\0'};
-        const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, text);
-        const int textHeight = renderer.getLineHeight(UI_12_FONT_ID);
-        renderer.drawText(UI_12_FONT_ID, x + (cellSize - textWidth) / 2, y + (cellSize - textHeight) / 2, text,
-                          !selected);
+        const int font = (cellSize >= 40) ? UI_12_FONT_ID : UI_10_FONT_ID;
+        const int textWidth = renderer.getTextWidth(font, text);
+        const int textHeight = renderer.getLineHeight(font);
+        renderer.drawText(font, x + (cellSize - textWidth) / 2, y + (cellSize - textHeight) / 2, text, !selected);
       } else {
         for (uint8_t note = 1; note <= sudoku::SIDE; ++note) {
           if ((notes[cell] & (1u << note)) == 0) continue;
@@ -522,6 +527,7 @@ void SudokuActivity::drawGrid() {
           }
         }
       }
+      renderer.drawRect(x, y, cellSize, cellSize, true);
     }
   }
 

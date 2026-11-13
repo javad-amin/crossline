@@ -5,6 +5,7 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <array>
 
 #include "ConnectFourActivity.h"
 #include "chess/ChessActivity.h"
@@ -14,6 +15,12 @@
 #include "SnakeActivity.h"
 #include "SudokuActivity.h"
 #include "components/UITheme.h"
+#include "components/icons/chess_icon.h"
+#include "components/icons/connect_four_icon.h"
+#include "components/icons/minesweeper_icon.h"
+#include "components/icons/nonograms_icon.h"
+#include "components/icons/snake_icon.h"
+#include "components/icons/sudoku_icon.h"
 #include "fontIds.h"
 
 GamesActivity::GamesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -26,13 +33,13 @@ void GamesActivity::onEnter() {
 
 void GamesActivity::openSelected() {
   switch (static_cast<GameChoice>(selectedIndex)) {
-    case GameChoice::Sudoku: {
-      auto activity = makeUniqueNoThrow<SudokuActivity>(renderer, mappedInput);
+    case GameChoice::Chess: {
+      auto activity = makeUniqueNoThrow<ChessActivity>(renderer, mappedInput);
       if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
       return;
     }
-    case GameChoice::Snake: {
-      auto activity = makeUniqueNoThrow<SnakeActivity>(renderer, mappedInput);
+    case GameChoice::ConnectFour: {
+      auto activity = makeUniqueNoThrow<ConnectFourActivity>(renderer, mappedInput);
       if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
       return;
     }
@@ -46,13 +53,13 @@ void GamesActivity::openSelected() {
       if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
       return;
     }
-    case GameChoice::ConnectFour: {
-      auto activity = makeUniqueNoThrow<ConnectFourActivity>(renderer, mappedInput);
+    case GameChoice::Snake: {
+      auto activity = makeUniqueNoThrow<SnakeActivity>(renderer, mappedInput);
       if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
       return;
     }
-    case GameChoice::Chess: {
-      auto activity = makeUniqueNoThrow<ChessActivity>(renderer, mappedInput);
+    case GameChoice::Sudoku: {
+      auto activity = makeUniqueNoThrow<SudokuActivity>(renderer, mappedInput);
       if (activity) startActivityForResult(std::move(activity), [](const ActivityResult&) {});
       return;
     }
@@ -116,12 +123,17 @@ void GamesActivity::render(RenderLock&&) {
   static const char* names[] = {
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
   };
-  names[0] = tr(STR_SUDOKU);
-  names[1] = tr(STR_SNAKE);
+  names[0] = "Chess";
+  names[1] = tr(STR_CONNECT_FOUR);
   names[2] = tr(STR_MINESWEEPER);
   names[3] = tr(STR_NONOGRAMS);
-  names[4] = tr(STR_CONNECT_FOUR);
-  names[5] = "Chess";
+  names[4] = tr(STR_SNAKE);
+  names[5] = tr(STR_SUDOKU);
+
+  static const uint8_t* icons[] = {
+      ChessIcon.data(),      ConnectFourIcon.data(), MinesweeperIcon.data(),
+      NonogramsIcon.data(),  SnakeIcon.data(),       SudokuIcon.data(),
+  };
 
   const int rh = rowHeight();
   const int top = listTop();
@@ -131,12 +143,23 @@ void GamesActivity::render(RenderLock&&) {
     const int y = top + i * rh;
     if (y + rh > renderer.getScreenHeight() - metrics.buttonHintsHeight) break;
     const bool sel = i == selectedIndex;
-    if (sel)
-      renderer.fillRect(margin, y, renderer.getScreenWidth() - margin * 2, rh - 4);
-    else
-      renderer.drawRect(margin, y, renderer.getScreenWidth() - margin * 2, rh - 4);
-    const int ty = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
-    renderer.drawCenteredText(UI_12_FONT_ID, ty, names[i], !sel);
+    const int rowX = margin;
+    const int rowW = renderer.getScreenWidth() - margin * 2;
+    if (sel) {
+      renderer.drawRect(rowX, y, rowW, rh - 4, 2, true);
+      renderer.fillRect(rowX + 3, y + 3, 4, rh - 10);
+    } else {
+      renderer.drawRect(rowX, y, rowW, rh - 4);
+    }
+
+    const int iconSize = 32;
+    const int iconX = rowX + 14;
+    const int iconY = y + (rh - 4 - iconSize) / 2;
+    renderer.drawIcon(icons[i], iconX, iconY, iconSize);
+
+    const int textX = iconX + iconSize + 12;
+    const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+    renderer.drawText(UI_12_FONT_ID, textX, textY, names[i], true);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
