@@ -1,5 +1,6 @@
 #include "GamesActivity.h"
 
+#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -10,6 +11,7 @@
 
 #include "../apps/CalculatorActivity.h"
 #include "../apps/StopwatchActivity.h"
+#include "../apps/NotesActivity.h"
 #include "ConnectFourActivity.h"
 #include "MappedInputManager.h"
 #include "MinesweeperActivity.h"
@@ -52,6 +54,7 @@ const GamesActivity::Item GamesActivity::kGames[] = {
 const GamesActivity::Item GamesActivity::kApps[] = {
     {"calculator", nullptr, nullptr},
     {"stopwatch", nullptr, nullptr},
+    {"notes", nullptr, nullptr},
 };
 
 GamesActivity::GamesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -102,6 +105,7 @@ void GamesActivity::loadPrefs() {
   loadArr("pinnedApps", pinnedApps);
   loadArr("hiddenGames", hiddenGames);
   loadArr("hiddenApps", hiddenApps);
+  LOG_INF("GAMES", "Loaded prefs: hiddenGames=%d hiddenApps=%d", static_cast<int>(hiddenGames.size()), static_cast<int>(hiddenApps.size()));
 }
 
 void GamesActivity::savePrefs() const {
@@ -116,7 +120,13 @@ void GamesActivity::savePrefs() const {
   saveArr("hiddenApps", hiddenApps);
   char out[2048];
   const size_t n = serializeJson(doc, out, sizeof(out));
-  if (n > 0) Storage.writeFile(kPrefsPath, String(out));
+  if (n > 0) {
+    if (!Storage.writeFile(kPrefsPath, String(out))) {
+      LOG_ERR("GAMES", "Failed to save prefs to %s", kPrefsPath);
+    } else {
+      LOG_INF("GAMES", "Saved prefs to %s", kPrefsPath);
+    }
+  }
 }
 
 void GamesActivity::rebuildLists() {
@@ -161,6 +171,7 @@ void GamesActivity::openSelectedIndex(int idx) {
     switch (ai) {
       case 0: if (auto a = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
       case 1: if (auto a = makeUniqueNoThrow<StopwatchActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 2: if (auto a = makeUniqueNoThrow<NotesActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
       default: return;
     }
   }
@@ -184,21 +195,70 @@ void GamesActivity::drawTabs() const {
   const int h = tabBarHeight();
   const int margin = std::max(16, metrics.contentSidePadding);
   const int w = renderer.getScreenWidth() - margin * 2;
-  const int gap = 6;
+  const int gap = 10;
   const int tabW = (w - gap) / 2;
   const char* labels[] = {tr(STR_GAMES), "Apps"};
+
   for (int i = 0; i < 2; ++i) {
     const int x = margin + i * (tabW + gap);
     const bool active = static_cast<int>(activeTab) == i;
+    renderer.drawRect(x, top, tabW, h);
     if (active) {
-      renderer.fillRect(x, top, tabW, h);
-      renderer.drawRect(x, top, tabW, h, 2, true);
-    } else {
-      renderer.drawRect(x, top, tabW, h, true);
+      renderer.fillRect(x + 2, top + 2, tabW - 4, h - 4);
     }
+    const int tw = renderer.getTextWidth(UI_12_FONT_ID, labels[i]);
+    const int tx = x + (tabW - tw) / 2;
     const int ty = top + (h - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
-    renderer.drawCenteredText(UI_12_FONT_ID, ty, labels[i], !active);
+    renderer.drawText(UI_12_FONT_ID, tx, ty, labels[i], !active);
   }
+}
+
+
+int GamesActivity::hiddenCount(Tab tab) const {
+  return static_cast<int>((tab == Tab::Games ? hiddenGames : hiddenApps).size());
+}
+
+bool GamesActivity::hiddenButtonRect(int& x, int& y, int& w, int& h) const {
+  if (showingHiddenList || hiddenCount(activeTab) <= 0) return false;
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int margin = std::max(16, metrics.contentSidePadding);
+  h = std::max(40, renderer.getLineHeight(UI_10_FONT_ID) + 16);
+  w = renderer.getScreenWidth() - margin * 2;
+  x = margin;
+  y = renderer.getScreenHeight() - metrics.buttonHintsHeight - h - 6;
+  return true;
+}
+
+int GamesActivity::mainListBottom() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 4;
+  int bx, by, bw, bh;
+  if (hiddenButtonRect(bx, by, bw, bh)) bottom = by - 4;
+  return bottom;
+}
+
+void GamesActivity::openHiddenList() {
+  if (hiddenCount(activeTab) <= 0) return;
+  showingHiddenList = true;
+  hiddenListIndex = 0;
+  requestUpdate();
+}
+
+void GamesActivity::closeHiddenList() {
+  showingHiddenList = false;
+  requestUpdate();
+}
+
+void GamesActivity::unhideHiddenIndex(int idx) {
+  auto& hv = activeTab == Tab::Games ? hiddenGames : hiddenApps;
+  if (idx < 0 || idx >= static_cast<int>(hv.size())) return;
+  const std::string id = hv[idx];
+  setHidden(activeTab, id.c_str(), false);
+  savePrefs();
+  rebuildLists();
+  if (hiddenCount(activeTab) <= 0) showingHiddenList = false;
+  else hiddenListIndex = std::min(hiddenListIndex, hiddenCount(activeTab) - 1);
+  requestUpdate();
 }
 
 int GamesActivity::indexAtPoint(int x, int y) const {
@@ -206,24 +266,15 @@ int GamesActivity::indexAtPoint(int x, int y) const {
   const int margin = std::max(16, metrics.contentSidePadding);
   const int rh = rowHeight();
   const int top = listTop();
-  const int count = activeTab == Tab::Games ? static_cast<int>(visibleGames.size()) : static_cast<int>(visibleApps.size());
-  if (x >= margin && x < renderer.getScreenWidth() - margin && y >= top) {
+  const int bottom = mainListBottom();
+  const int count = showingHiddenList ? hiddenCount(activeTab)
+                                      : (activeTab == Tab::Games ? static_cast<int>(visibleGames.size())
+                                                                 : static_cast<int>(visibleApps.size()));
+  if (x >= margin && x < renderer.getScreenWidth() - margin && y >= top && y < bottom) {
     const int idx = (y - top) / rh;
     if (idx >= 0 && idx < count) return idx;
   }
   return -1;
-}
-
-void GamesActivity::showHideConfirm(Tab tab, const char* id, const char* label) {
-  const char* opts[] = {"Cancel", "Hide"};
-  optionPopup.show("Hide item?", label, opts, 2, 0, [this, tab, id](int choice) {
-    if (choice == 1) {
-      setHidden(tab, id, true);
-      savePrefs();
-      rebuildLists();
-    }
-    requestUpdate();
-  });
 }
 
 void GamesActivity::showItemOptions(Tab tab, int visibleIndex) {
@@ -243,23 +294,56 @@ void GamesActivity::showItemOptions(Tab tab, int visibleIndex) {
     else if (id == "snake") title = tr(STR_SNAKE);
     else title = tr(STR_SUDOKU);
   } else {
-    title = (std::string(item.id) == "calculator") ? "Calculator" : "Stopwatch";
+    const std::string id = item.id;
+    if (id == "calculator") title = "Calculator";
+    else if (id == "stopwatch") title = "Stopwatch";
+    else title = "Notes";
   }
-  optionPopup.show("Options", title.c_str(), opts, 3, 0, [this, tab, id=item.id, title](int choice) {
+  optionPopup.show("Options", title.c_str(), opts, 3, 0, [this, tab, id = item.id](int choice) {
     if (choice == 0) {
       setPinned(tab, id, !isPinned(tab, id));
       savePrefs();
       rebuildLists();
     } else if (choice == 1) {
-      showHideConfirm(tab, id, title.c_str());
-      return;
+      setHidden(tab, id, true);
+      savePrefs();
+      rebuildLists();
+      LOG_INF("GAMES", "Hidden id=%s tab=%d hiddenGames=%d hiddenApps=%d", id, static_cast<int>(tab),
+              static_cast<int>(hiddenGames.size()), static_cast<int>(hiddenApps.size()));
     }
     requestUpdate();
   });
+  requestUpdate();
 }
 
 void GamesActivity::loop() {
   if (optionPopup.handleInput(mappedInput, [this]{ requestUpdate(); })) return;
+
+  if (showingHiddenList) {
+    const int hcount = hiddenCount(activeTab);
+    if (hcount <= 0) { showingHiddenList = false; requestUpdate(); return; }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
+        mappedInput.wasSwipe() == MappedInputManager::SwipeDir::Right) {
+      closeHiddenList();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
+      hiddenListIndex = (hiddenListIndex + hcount - 1) % hcount; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+      hiddenListIndex = (hiddenListIndex + 1) % hcount; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      unhideHiddenIndex(hiddenListIndex);
+      return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const int idx = indexAtPoint(tx, ty);
+      if (idx >= 0) { hiddenListIndex = idx; unhideHiddenIndex(idx); }
+    }
+    return;
+  }
 
   const bool onGames = activeTab == Tab::Games;
   int& sel = onGames ? selectedIndex : appSelectedIndex;
@@ -282,27 +366,38 @@ void GamesActivity::loop() {
   }
 
   if (count == 0) {
-    // nothing to select; allow tab switching
     if (mappedInput.wasReleased(MappedInputManager::Button::Left) || mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
       if (activeTab == Tab::Apps) { activeTab = Tab::Games; requestUpdate(); }
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Right) || mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
       if (activeTab == Tab::Games) { activeTab = Tab::Apps; requestUpdate(); }
     }
-    int x=0,y=0;
-    if (mappedInput.wasScreenTapped(x,y)) {
+    int x = 0, y = 0;
+    if (mappedInput.wasScreenTapped(x, y)) {
       const auto& metrics = UITheme::getInstance().getMetrics();
       const int margin = std::max(16, metrics.contentSidePadding);
       const int w = renderer.getScreenWidth() - margin * 2;
-      const int gap = 6; const int tabW = (w-gap)/2;
-      if (y >= tabBarTop() && y < tabBarTop()+tabBarHeight()) {
-        if (x>=margin && x<margin+tabW) { activeTab=Tab::Games; requestUpdate(); }
-        else if (x>=margin+tabW+gap && x<margin+tabW*2+gap) { activeTab=Tab::Apps; requestUpdate(); }
+      const int gap = 10;
+      const int tabW = (w - gap) / 2;
+      if (y >= tabBarTop() && y < tabBarTop() + tabBarHeight()) {
+        if (x >= margin && x < margin + tabW) { activeTab = Tab::Games; requestUpdate(); }
+        else if (x >= margin + tabW + gap && x < margin + tabW * 2 + gap) { activeTab = Tab::Apps; requestUpdate(); }
+      } else {
+        int bx, by, bw, bh;
+        if (hiddenButtonRect(bx, by, bw, bh) && x >= bx && x < bx + bw && y >= by && y < by + bh) {
+          openHiddenList();
+        }
       }
     }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && hiddenCount(activeTab) > 0) {
+      openHiddenList();
+      return;
+    }
+    touchHoldIndex = -1;
+    touchHoldFired = false;
     return;
   }
 
-  // Long press for options
+  // Long press for options (button / SDK events)
   if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, 700)) {
     showItemOptions(activeTab, sel);
     return;
@@ -311,6 +406,32 @@ void GamesActivity::loop() {
   if (mappedInput.wasScreenLongPress(tx, ty)) {
     const int idx = indexAtPoint(tx, ty);
     if (idx >= 0) { sel = idx; showItemOptions(activeTab, idx); return; }
+  }
+
+  // Manual screen long-press fallback
+  int hx = 0, hy = 0;
+  if (mappedInput.isScreenTouchHeld(hx, hy)) {
+    const int idx = indexAtPoint(hx, hy);
+    const uint32_t now = millis();
+    if (idx >= 0) {
+      if (touchHoldIndex != idx || touchHoldTab != activeTab) {
+        touchHoldIndex = idx;
+        touchHoldTab = activeTab;
+        touchHoldStartMs = now;
+        touchHoldFired = false;
+      } else if (!touchHoldFired && now - touchHoldStartMs >= 700) {
+        touchHoldFired = true;
+        sel = idx;
+        showItemOptions(activeTab, idx);
+        return;
+      }
+    } else {
+      touchHoldIndex = -1;
+      touchHoldFired = false;
+    }
+  } else {
+    touchHoldIndex = -1;
+    touchHoldFired = false;
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Up)) { sel = (sel + count - 1) % count; requestUpdate(); return; }
@@ -325,18 +446,29 @@ void GamesActivity::loop() {
     else { sel = (sel + 1) % count; requestUpdate(); }
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) { openSelectedIndex(sel); return; }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    if (touchHoldFired) { touchHoldFired = false; return; }
+    openSelectedIndex(sel);
+    return;
+  }
   if (mappedInput.wasReleased(MappedInputManager::Button::PageBack)) { activeTab = Tab::Games; requestUpdate(); return; }
   if (mappedInput.wasReleased(MappedInputManager::Button::PageForward)) { activeTab = Tab::Apps; requestUpdate(); return; }
 
   if (mappedInput.wasScreenTapped(tx, ty)) {
+    if (touchHoldFired) { touchHoldFired = false; return; }
     const auto& metrics = UITheme::getInstance().getMetrics();
     const int margin = std::max(16, metrics.contentSidePadding);
     const int w = renderer.getScreenWidth() - margin * 2;
-    const int gap = 6; const int tabW = (w-gap)/2;
-    if (ty >= tabBarTop() && ty < tabBarTop()+tabBarHeight()) {
-      if (tx >= margin && tx < margin+tabW) { activeTab=Tab::Games; requestUpdate(); return; }
-      if (tx >= margin+tabW+gap && tx < margin+tabW*2+gap) { activeTab=Tab::Apps; requestUpdate(); return; }
+    const int gap = 10;
+    const int tabW = (w - gap) / 2;
+    if (ty >= tabBarTop() && ty < tabBarTop() + tabBarHeight()) {
+      if (tx >= margin && tx < margin + tabW) { activeTab = Tab::Games; requestUpdate(); return; }
+      if (tx >= margin + tabW + gap && tx < margin + tabW * 2 + gap) { activeTab = Tab::Apps; requestUpdate(); return; }
+    }
+    int bx, by, bw, bh;
+    if (hiddenButtonRect(bx, by, bw, bh) && tx >= bx && tx < bx + bw && ty >= by && ty < by + bh) {
+      openHiddenList();
+      return;
     }
     const int idx = indexAtPoint(tx, ty);
     if (idx >= 0) { sel = idx; openSelectedIndex(idx); }
@@ -348,62 +480,117 @@ void GamesActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, tr(STR_GAMES));
+  const char* header = showingHiddenList ? "Hidden items" : tr(STR_GAMES);
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, header);
   drawTabs();
 
   const int rh = rowHeight();
   const int top = listTop();
   const int margin = std::max(16, metrics.contentSidePadding);
   const bool onGames = activeTab == Tab::Games;
-  const auto& vis = onGames ? visibleGames : visibleApps;
-  const int sel = onGames ? selectedIndex : appSelectedIndex;
-  const int count = static_cast<int>(vis.size());
 
-  if (count == 0) {
-    renderer.drawCenteredText(UI_12_FONT_ID, top + 20, "No items");
+  if (showingHiddenList) {
+    const auto& hv = onGames ? hiddenGames : hiddenApps;
+    const int count = static_cast<int>(hv.size());
+    const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 4;
+    if (count == 0) {
+      renderer.drawCenteredText(UI_12_FONT_ID, top + 20, "No hidden items");
+    } else {
+      for (int i = 0; i < count; ++i) {
+        const int y = top + i * rh;
+        if (y + rh > bottom) break;
+        const bool selected = i == hiddenListIndex;
+        const int rowX = margin;
+        const int rowW = renderer.getScreenWidth() - margin * 2;
+        if (selected) {
+          renderer.drawRect(rowX, y, rowW, rh - 4, 2, true);
+          renderer.fillRect(rowX + 3, y + 3, 4, rh - 10);
+        } else {
+          renderer.drawRect(rowX, y, rowW, rh - 4);
+        }
+        std::string name = hv[i];
+        if (onGames) {
+          if (name == "chess") name = "Chess";
+          else if (name == "connectfour") name = tr(STR_CONNECT_FOUR);
+          else if (name == "minesweeper") name = tr(STR_MINESWEEPER);
+          else if (name == "nonograms") name = tr(STR_NONOGRAMS);
+          else if (name == "snake") name = tr(STR_SNAKE);
+          else if (name == "sudoku") name = tr(STR_SUDOKU);
+        } else {
+          if (name == "calculator") name = "Calculator";
+          else if (name == "stopwatch") name = "Stopwatch";
+          else if (name == "notes") name = "Notes";
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "Unhide: %s", name.c_str());
+        const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+        renderer.drawText(UI_12_FONT_ID, rowX + 16, textY, buf, true);
+      }
+    }
   } else {
-    for (int i = 0; i < count; ++i) {
-      const int y = top + i * rh;
-      if (y + rh > renderer.getScreenHeight() - metrics.buttonHintsHeight) break;
-      const bool selected = i == sel;
-      const int rowX = margin;
-      const int rowW = renderer.getScreenWidth() - margin * 2;
-      if (selected) {
-        renderer.drawRect(rowX, y, rowW, rh - 4, 2, true);
-        renderer.fillRect(rowX + 3, y + 3, 4, rh - 10);
-      } else {
-        renderer.drawRect(rowX, y, rowW, rh - 4);
-      }
+    const auto& vis = onGames ? visibleGames : visibleApps;
+    const int sel = onGames ? selectedIndex : appSelectedIndex;
+    const int count = static_cast<int>(vis.size());
+    const int bottom = mainListBottom();
+    if (count == 0) {
+      renderer.drawCenteredText(UI_12_FONT_ID, top + 20, "No items");
+    } else {
+      for (int i = 0; i < count; ++i) {
+        const int y = top + i * rh;
+        if (y + rh > bottom) break;
+        const bool selected = i == sel;
+        const int rowX = margin;
+        const int rowW = renderer.getScreenWidth() - margin * 2;
+        if (selected) {
+          renderer.drawRect(rowX, y, rowW, rh - 4, 2, true);
+          renderer.fillRect(rowX + 3, y + 3, 4, rh - 10);
+        } else {
+          renderer.drawRect(rowX, y, rowW, rh - 4);
+        }
 
-      const Item& item = onGames ? kGames[vis[i]] : kApps[vis[i]];
-      const bool pinned = isPinned(activeTab, item.id);
-      int textX = rowX + 16;
-      if (item.icon) {
-        const int iconSize = 32;
-        const int iconX = rowX + 14;
-        const int iconY = y + (rh - 4 - iconSize) / 2;
-        renderer.drawIcon(item.icon, iconX, iconY, iconSize);
-        textX = iconX + iconSize + 12;
+        const Item& item = onGames ? kGames[vis[i]] : kApps[vis[i]];
+        const bool pinned = isPinned(activeTab, item.id);
+        int textX = rowX + 16;
+        if (item.icon) {
+          const int iconSize = 32;
+          const int iconX = rowX + 14;
+          const int iconY = y + (rh - 4 - iconSize) / 2;
+          renderer.drawIcon(item.icon, iconX, iconY, iconSize);
+          textX = iconX + iconSize + 12;
+        }
+        const char* name = item.label;
+        if (onGames) {
+          if (std::string(item.id) == "chess") name = "Chess";
+          else if (std::string(item.id) == "connectfour") name = tr(STR_CONNECT_FOUR);
+          else if (std::string(item.id) == "minesweeper") name = tr(STR_MINESWEEPER);
+          else if (std::string(item.id) == "nonograms") name = tr(STR_NONOGRAMS);
+          else if (std::string(item.id) == "snake") name = tr(STR_SNAKE);
+          else if (std::string(item.id) == "sudoku") name = tr(STR_SUDOKU);
+        } else {
+          if (std::string(item.id) == "calculator") name = "Calculator";
+          else if (std::string(item.id) == "stopwatch") name = "Stopwatch";
+          else name = "Notes";
+        }
+        char buf[64];
+        if (pinned) snprintf(buf, sizeof(buf), "* %s", name); else snprintf(buf, sizeof(buf), "%s", name);
+        const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+        renderer.drawText(UI_12_FONT_ID, textX, textY, buf, true);
       }
-      const char* name = item.label;
-      if (onGames) {
-        if (std::string(item.id) == "chess") name = "Chess";
-        else if (std::string(item.id) == "connectfour") name = tr(STR_CONNECT_FOUR);
-        else if (std::string(item.id) == "minesweeper") name = tr(STR_MINESWEEPER);
-        else if (std::string(item.id) == "nonograms") name = tr(STR_NONOGRAMS);
-        else if (std::string(item.id) == "snake") name = tr(STR_SNAKE);
-        else if (std::string(item.id) == "sudoku") name = tr(STR_SUDOKU);
-      } else {
-        name = std::string(item.id) == "calculator" ? "Calculator" : "Stopwatch";
-      }
-      char buf[64];
-      if (pinned) snprintf(buf, sizeof(buf), "* %s", name); else snprintf(buf, sizeof(buf), "%s", name);
-      const int textY = y + (rh - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
-      renderer.drawText(UI_12_FONT_ID, textX, textY, buf, true);
+    }
+
+    int bx, by, bw, bh;
+    if (hiddenButtonRect(bx, by, bw, bh)) {
+      renderer.drawRect(bx, by, bw, bh, true);
+      char hbuf[48];
+      snprintf(hbuf, sizeof(hbuf), "Manage hidden (%d)", hiddenCount(activeTab));
+      const int tw = renderer.getTextWidth(UI_10_FONT_ID, hbuf);
+      const int tx = bx + (bw - tw) / 2;
+      const int ty = by + (bh - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+      renderer.drawText(UI_10_FONT_ID, tx, ty, hbuf, true);
     }
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), showingHiddenList ? "Unhide" : tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }
