@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cassert>
 #include <memory>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include "util/ScreenshotInfo.h"
 
 class Activity;    // forward declaration
+struct ChapterResult;
 class RenderLock;  // forward declaration
 
 enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, OPDS_BROWSER, FILE_TRANSFER, SETTINGS_MENU };
@@ -67,6 +69,9 @@ class ActivityManager {
   // This variable must only be set by the main loop, to avoid race conditions
   std::atomic<bool> requestedUpdate{false};
 
+  // Set by UI that wants to sleep; main loop consumes it and runs enterDeepSleep().
+  bool sleepRequested = false;
+
   // Counts screen changes, so the Bluetooth page turner can tell one visit of a book from the next.
   // Written by the main loop under RenderLock; the render task captures it under that lock.
   uint32_t screenVisit = 0;
@@ -94,6 +99,8 @@ class ActivityManager {
   void goToBrowser();
   void goToPlugins(bool showOpds);
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
+  void goToReaderAtChapter(std::string path, ChapterResult chapter);
+  void goToReaderAtPage(std::string path, uint32_t page);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
@@ -108,6 +115,12 @@ class ActivityManager {
   void popActivity();
 
   bool preventAutoSleep() const;
+  void requestSleep() { sleepRequested = true; }
+  bool consumeSleepRequest() {
+    const bool requested = sleepRequested;
+    sleepRequested = false;
+    return requested;
+  }
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
   // Bluetooth page turner (lib/BlePageTurner): the book in front, whether it has painted a page, and

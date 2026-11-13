@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <utility>
 
+#include "HomeBackground.h"
 #include "MappedInputManager.h"
 #include "UITheme.h"
 #include "fontIds.h"
@@ -43,12 +44,22 @@ void CoverGridHomeUi::begin(const std::vector<RecentBook>& recent, bool opds, bo
   books = &recent;
   hasOpds = opds;
   hasContinueReading = continuing;
-  if (!recent.empty() && !titlesOnly) coverCache.begin();
+  if (titlesOnly) {
+    titleSlots = std::clamp(SETTINGS.getHomeTitleListBookCount(), 1, MAX_TITLE_BOOKS);
+    background = home_background::load(renderer);
+  } else if (!recent.empty()) {
+    coverCache.begin();
+  }
   resetUi();
   app.on(SELECT, &CoverGridHomeUi::onAction, this);
   app.setScreen(&CoverGridHomeUi::screenFn, this);
   refreshCoverPaths();
-  progress = hasContinueReading && !books->empty() ? loadBookProgress(books->front().path) : -1;
+  const auto latest = std::find_if(books->begin(), books->end(), [](const RecentBook& book) { return book.latest; });
+  progress = -1;
+  if (hasContinueReading && !books->empty()) {
+    const RecentBook& latestBook = latest != books->end() ? *latest : books->front();
+    progress = latestBook.progressLoaded ? latestBook.progressPercent : loadBookProgress(latestBook.path);
+  }
   if (progress >= 0) snprintf(progressText, sizeof(progressText), "%d%%", progress);
 }
 
@@ -85,18 +96,24 @@ void CoverGridHomeUi::noteThumbHeight(int slotHeight) {
 void CoverGridHomeUi::onAction(const fui::ActionEvent& event, void* user) {
   auto& self = *static_cast<CoverGridHomeUi*>(user);
   self.pending = event.value;
+  self.lastLongPress = event.longPress;
   self.app.clearTapFlash();
 }
 
 int CoverGridHomeUi::selectedAction(const MappedInputManager& input) {
   pending = -1;
-  const auto touch = routeTouch(input);
+  lastLongPress = false;
+  const auto touch = routeTouch(input, titlesOnly);
+  if (touch.event && touch.event.longPress) {
+    return pending;
+  }
   return touch.snap.touchReleased ? pending : -1;
 }
 
 void CoverGridHomeUi::screenFn(UiScreen& screen, void* user) { static_cast<CoverGridHomeUi*>(user)->draw(screen); }
 
 void CoverGridHomeUi::draw(UiScreen& screen) {
+  if (background) memcpy(renderer.getFrameBuffer(), background.get(), renderer.getBufferSize());
   coverCache.prepare();
   const auto& theme = screen.theme();
   const auto safe = UITheme::getInstance().getScreenSafeArea(renderer, true);
@@ -304,8 +321,10 @@ void CoverGridHomeUi::drawTitleList(UiScreen& screen) {
   const auto& theme = screen.theme();
   const fui::Rect body = screen.body();
   const bool landscape = renderer.getScreenWidth() > renderer.getScreenHeight();
-  const int columns = landscape && titleSlots > 6 ? 2 : 1;
-  const int rows = (titleSlots + columns - 1) / columns;
+  // Rows are always sized for the maximum, so fewer books leave the top of the screen empty
+  // (allowing the home background to show), matching perf behavior.
+  const int columns = landscape ? 2 : 1;
+  const int rows = (MAX_TITLE_BOOKS + columns - 1) / columns;
   constexpr int gap = 2;
   grid.cellInset = fui::Insets{0, TITLE_ROW_SIDE_INSET, 0, TITLE_ROW_SIDE_INSET};
   grid.gap = grid.rowGap = gap;
@@ -315,9 +334,9 @@ void CoverGridHomeUi::drawTitleList(UiScreen& screen) {
   grid.coverSize.height = grid.rowHeight;
   rowRadius = theme.listRowRadius;
 
-  grid.count = static_cast<uint16_t>(std::min<size_t>(books->size(), titleSlots));
+  grid.count = static_cast<uint16_t>(std::min<size_t>(books->size(), static_cast<size_t>(titleSlots)));
   // Latest book sits on the bottom row, so anchor a short list to the bottom.
-  const int emptyRows = rows - (grid.count + columns - 1) / columns;
+  const int emptyRows = rows - (static_cast<int>(grid.count) + columns - 1) / columns;
   gridBounds = body;
   gridBounds.y = static_cast<int16_t>(gridBounds.y + emptyRows * (grid.rowHeight + gap));
   gridBounds.height = static_cast<int16_t>(gridBounds.height - emptyRows * (grid.rowHeight + gap));
@@ -325,11 +344,12 @@ void CoverGridHomeUi::drawTitleList(UiScreen& screen) {
   grid.columns = static_cast<uint8_t>(columns);
   grid.columnLayout = fui::CoverGridColumnLayout::EqualWidth;
   grid.action = SELECT;
-  grid.inputMask = fui::InputTouch;
+  grid.inputMask = static_cast<uint16_t>(fui::InputTouch | fui::InputLongPress);
   // Selection is painted per row so it matches the settings list highlight.
   grid.selectedIndex = -1;
   grid.selectionIndicator = fui::CoverGridSelectionIndicator::Cell;
   grid.cellStyles = fui::defaultListRowStyles();
+  if (background) grid.cellStyles.normal.background = fui::Paint::none();
   grid.cellStyles.selected = grid.cellStyles.normal;
   grid.cellStyles.active = grid.cellStyles.normal;
   grid.labelHeight = 0;
@@ -347,6 +367,7 @@ void CoverGridHomeUi::drawTitleList(UiScreen& screen) {
   fui::coverGrid(screen.frame(), gridBounds, grid);
 }
 
+
 bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, const size_t index) {
   if (index >= books->size()) return false;
   const auto& book = (*books)[index];
@@ -355,7 +376,7 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
     const size_t slash = book.path.find_last_of('/');
     title = book.path.c_str() + (slash == std::string::npos ? 0 : slash + 1);
   }
-  const bool latest = index == 0;
+  const bool latest = book.latest;
   target.fill(rect,
               static_cast<int>(index) == selected ? fui::Paint::dither(fui::Color::LightGray)
                                                   : fui::Paint::solid(fui::Color::White),
@@ -364,13 +385,28 @@ bool CoverGridHomeUi::paintTitleRow(fui::DrawTarget& target, fui::Rect rect, con
 
   const auto style = latest ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
   const int lineHeight = std::max(1, renderer.getLineHeight(TITLE_LIST_FONT_ID));
+
+  char progressLabel[12] = {};
+  int progressWidth = 0;
+  const bool showProgress = book.progressLoaded && book.progressPercent >= 0;
+  if (showProgress) {
+    snprintf(progressLabel, sizeof(progressLabel), "%d%%", std::clamp(book.progressPercent, 0, 100));
+    progressWidth = renderer.getTextAdvanceX(TITLE_LIST_FONT_ID, progressLabel, EpdFontFamily::REGULAR) + 8;
+  }
+
+  const int textMaxWidth = std::max(1, rect.width - 2 * TITLE_ROW_TEXT_PADDING - progressWidth);
   const int maxLines = std::clamp((rect.height - 2 * TITLE_ROW_VPADDING) / lineHeight, 1, 3);
-  const auto lines =
-      renderer.wrappedText(TITLE_LIST_FONT_ID, title, rect.width - 2 * TITLE_ROW_TEXT_PADDING, maxLines, style);
+  const auto lines = renderer.wrappedText(TITLE_LIST_FONT_ID, title, textMaxWidth, maxLines, style);
   int y = rect.y + (rect.height - lineHeight * static_cast<int>(lines.size())) / 2;
   for (const auto& line : lines) {
     renderer.drawText(TITLE_LIST_FONT_ID, rect.x + TITLE_ROW_TEXT_PADDING, y, line.c_str(), true, style);
     y += lineHeight;
+  }
+  if (showProgress) {
+    const int progressX = rect.x + rect.width - TITLE_ROW_TEXT_PADDING -
+                           renderer.getTextAdvanceX(TITLE_LIST_FONT_ID, progressLabel, EpdFontFamily::REGULAR);
+    const int progressY = rect.y + (rect.height - lineHeight) / 2;
+    renderer.drawText(TITLE_LIST_FONT_ID, progressX, progressY, progressLabel, true, EpdFontFamily::REGULAR);
   }
   return true;
 }

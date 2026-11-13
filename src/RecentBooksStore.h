@@ -10,6 +10,11 @@ struct RecentBook {
   std::string title;
   std::string author;
   std::string coverBmpPath;
+  bool pinned = false;
+  bool latest = false;
+  bool random = false;
+  int progressPercent = -1;
+  bool progressLoaded = false;
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -17,9 +22,11 @@ struct RecentBook {
 class RecentBooksStore : public PersistableStore<RecentBooksStore> {
  public:
   static constexpr int MAX_RECENT_BOOKS = 10;
+  static constexpr int MAX_PINNED_BOOKS = 10;
 
  private:
   std::vector<RecentBook> recentBooks;
+  std::vector<RecentBook> pinnedBooks;
 
   RecentBooksStore() = default;
   ~RecentBooksStore() = default;
@@ -30,6 +37,13 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
   static const char* getFilePath() { return "/.crosspoint/recent.json"; }
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
+
+  bool setPinned(const RecentBook& book, bool pinned);
+  bool isPinned(const std::string& path) const;
+  const std::vector<RecentBook>& getPinnedBooks() const { return pinnedBooks; }
+  void cacheProgress(const std::string& path, int progressPercent);
+  bool removeFromHome(const RecentBook& book);
+  void removeDeletedBook(const std::string& path);
 
   // Add a book to the recent list (moves to front if already exists)
   void addBook(const std::string& path, const std::string& title, const std::string& author,
@@ -61,6 +75,8 @@ class RecentBooksStore : public PersistableStore<RecentBooksStore> {
 
   // Get the count of recent books
   int getCount() const { return static_cast<int>(recentBooks.size()); }
+
+  RecentBook getDataFromBook(std::string path) const;
 };
 
 // Helper macro to access recent books store

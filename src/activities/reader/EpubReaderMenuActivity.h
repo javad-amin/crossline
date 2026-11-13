@@ -25,6 +25,7 @@ class EpubReaderMenuActivity final : public UiListActivity {
     SAVE_CLIPPING,
     VIEW_CLIPPINGS,
     TOGGLE_BOOKMARK,
+    JUMP_TO_LATEST_BOOKMARK,
     SCREENSHOT,
     DISPLAY_QR,
     GO_HOME,

@@ -23,6 +23,8 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "HomeBackground.h"
+#include "LastPageSnapshot.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -610,21 +612,69 @@ void SleepActivity::onEnter() {
   const uint8_t sleepScreen = SETTINGS.sleepScreen;
   if (sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT_CUSTOM ||
       sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_TRANSPARENT) {
-    // Transparent mode retains the current framebuffer. Materialize any
-    // output-level inversion first so the retained content keeps its visible
-    // polarity after the display driver returns to normal.
+    // Transparent modes: keep the last book page as base when available, then overlay content.
     if (frameWasInverted) renderer.invertScreen();
-    if (APP_STATE.lastSleepFromReader) {
-      ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-    }
-    drawSleepPopupPreservingFrame(renderer);
-    if (APP_STATE.lastSleepFromReader) {
-      renderer.setOrientation(GfxRenderer::Orientation::Portrait);
-    }
+    const bool hasLastPage = last_page::load(renderer);
+    if (!hasLastPage) renderer.clearScreen();
     releaseSdFontCachesForDecode(renderer);
+
     if (sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_TRANSPARENT) {
-      return renderCoverSleepScreen();
+      // Overlay the current book's cover on top of the last page (Crossline transparent behavior).
+      if (!APP_STATE.openEpubPath.empty()) {
+        const bool originalThresholds =
+            renderer.grayscaleCapabilities(sleepGrayscaleMode(renderer)).supported() &&
+            display.getController() == HalDisplay::Controller::SSD1677 &&
+            SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
+        std::string coverBmpPath;
+        const bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
+
+        if (FsHelpers::hasXtcExtension(APP_STATE.openEpubPath)) {
+          Xtc lastXtc(APP_STATE.openEpubPath, "/.crosspoint");
+          if (lastXtc.load() && lastXtc.generateCoverBmp()) {
+            coverBmpPath = lastXtc.getCoverBmpPath();
+          }
+        } else if (FsHelpers::hasReflowableBookExtension(APP_STATE.openEpubPath)) {
+          Epub lastEpub(APP_STATE.openEpubPath, "/.crosspoint");
+          if (lastEpub.load(true, true) && lastEpub.generateCoverBmp(cropped, originalThresholds)) {
+            coverBmpPath = lastEpub.getCoverBmpPath(cropped, originalThresholds);
+          }
+        }
+
+        if (!coverBmpPath.empty()) {
+          HalFile file;
+          if (Storage.openFileForRead("SLP", coverBmpPath, file)) {
+            Bitmap bitmap(file);
+            if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+              LOG_DBG("SLP", "Rendering sleep cover overlay: %s", coverBmpPath.c_str());
+              // Preserve the last-page base; draw cover as overlay on top.
+              renderBitmapSleepScreen(bitmap, true);
+              return;
+            }
+          }
+        }
+      }
+
+      // No cover available: try a custom transparent overlay image on top of the last page.
+      if (renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_BMP) || renderSleepOverlayPath(TRANSPARENT_SLEEP_ROOT_PNG)) {
+        return;
+      }
+      {
+        std::string selectedOverlay;
+        if (selectRandomSleepFile(TRANSPARENT_SLEEP_DIR, TRANSPARENT_SLEEP_LEGACY_DIR, SleepRecentKind::Overlay,
+                                  selectedOverlay) &&
+            renderSleepOverlayPath(selectedOverlay)) {
+          return;
+        }
+      }
+      // No overlay assets: keep last page if present, otherwise fall back to normal cover/custom behavior.
+      if (hasLastPage) {
+        renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+        return;
+      }
+      return renderTransparentCustomSleepScreen();
     }
+
+    // TRANSPARENT_CUSTOM: overlay custom transparent image over last page.
     return renderTransparentCustomSleepScreen();
   }
 
@@ -667,6 +717,7 @@ void SleepActivity::renderCustomSleepScreen() const {
                       SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Loading: /sleep.bmp");
+      home_background::setSource("/sleep.bmp", file.fileSize(), file.modificationTime());
       renderBitmapSleepScreen(bitmap);
       file.close();
       return;
@@ -687,6 +738,7 @@ void SleepActivity::renderCustomSleepScreen() const {
                         display.getController() == HalDisplay::Controller::SSD1677 &&
                         SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        home_background::setSource(selectedPath.c_str(), randFile.fileSize(), randFile.modificationTime());
         renderBitmapSleepScreen(bitmap);
         randFile.close();
         return;
@@ -741,9 +793,15 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap, const bool pre
     return;
   }
 
-  if (!preserveBackground &&
-      SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
+  const bool invertedBitmap = !preserveBackground &&
+                              SETTINGS.sleepScreenCoverFilter ==
+                                  CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE;
+  if (invertedBitmap) {
     renderer.invertScreen();
+  }
+
+  if (!preserveBackground) {
+    home_background::captureFromBitmap(renderer, bitmap, x, y, cropX, cropY, invertedBitmap);
   }
 
   // Cover + Transparent: the B/W cover is the overlay's background; the overlay renderers redraw its gray planes.
@@ -899,6 +957,13 @@ void SleepActivity::renderTransparentCustomSleepScreen() const {
 
   if (!selectedPath.empty() && renderSleepOverlayPath(selectedPath)) return;
 
+  // No dedicated overlay: reuse the Custom sleep image as an overlay (preserving
+  // the current frame, e.g. last book page) so one image works for both modes.
+  if (renderSleepOverlayPath("/sleep.bmp")) return;
+  selectedPath.clear();
+  selectRandomSleepFile("/.sleep", "/sleep", SleepRecentKind::Standard, selectedPath);
+  if (!selectedPath.empty() && renderSleepOverlayPath(selectedPath)) return;
+
   LOG_ERR("SLP", "No valid transparent sleep overlay found");
   if (overlayCover) {
     // Show the plain cover.
@@ -906,7 +971,10 @@ void SleepActivity::renderTransparentCustomSleepScreen() const {
     overlayCover = nullptr;
     if (cover.rewindToData() == BmpReaderError::Ok) return renderBitmapSleepScreen(cover);
   }
-  renderDefaultSleepScreen();
+
+  // No overlay/custom image found. If we have a preserved base (last page), keep it.
+  // Otherwise fall back to default sleep screen.
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
 void SleepActivity::renderCoverSleepScreen() const {
@@ -976,6 +1044,7 @@ void SleepActivity::renderCoverSleepScreen() const {
     Bitmap bitmap(file);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
+      home_background::setSource(coverBmpPath.c_str(), file.fileSize(), file.modificationTime());
       if (withOverlay) overlayCover = &bitmap;
       renderBitmapSleepScreen(bitmap);
       overlayCover = nullptr;

@@ -1,13 +1,18 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "EndOfBookOptions.h"
+#include "LastPageSnapshot.h"
 #include "ReaderSession.h"
 #include "activities/Activity.h"
+
+struct ChapterResult;
 
 class ReaderActivity : public Activity {
   friend class ActivityManager;  // turns pages for a Bluetooth remote (ActivityManager::remoteTurn)
@@ -16,13 +21,18 @@ class ReaderActivity : public Activity {
   std::string bookPath;
   int pagesUntilFullRefresh = 0;
   bool forcedRefreshPending = false;
+  std::optional<ChapterResult> initialChapter;
+  std::optional<uint32_t> initialPage;
 
   std::unique_ptr<EndOfBookOptions> endOfBookOptions;
   std::atomic<bool> endOfBookOptionsReady{false};
   ReaderSession readerSession;
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
-  void markPageRendered() { pageRendered.store(true, std::memory_order_release); }
+  void markPageRendered() {
+    pageRendered.store(true, std::memory_order_release);
+    last_page::remember(renderer);
+  }
   void rememberBookOnceRendered();
 
   explicit ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -75,7 +85,9 @@ class ReaderActivity : public Activity {
   ~ReaderActivity() override = default;
 
   static std::unique_ptr<ReaderActivity> create(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                                std::string path, bool allowFastInitialRefresh);
+                                                std::string path, bool allowFastInitialRefresh,
+                                                std::optional<ChapterResult> initialChapter = std::nullopt,
+                                                std::optional<uint32_t> initialPage = std::nullopt);
 
   void onEnter() override;
   void onExit() override;

@@ -13,6 +13,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "activities/ActivityManager.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/icons/customListIcons.h"
@@ -182,7 +183,17 @@ void FrontlightPanelActivity::runTile(const int idx) {
       SETTINGS.saveToFile();
       requestUpdate();
       break;
-    case 4:  // Bluetooth page turner
+    case 4:  // Home
+      GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      close();
+      activityManager.goHome();
+      break;
+    case 5:  // Sleep
+      close();
+      activityManager.requestSleep();
+      break;
+    case 6:  // Bluetooth page turner (shown only when compiled in)
       if (!bleturner::status().compiledIn) break;
       SETTINGS.ble.enabled = SETTINGS.ble.enabled ? 0 : 1;
       // The panel suspends the radio; tick() reconnects in an eligible screen.
@@ -389,11 +400,19 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   if (mappedInput.hasTouch()) {
     const int tileCount = bleturner::status().compiledIn ? kTileCount : kTileCount - 1;
     const fui::BitmapRef icons[kTileCount] = {
-        fui::bitmapFromIcon(icon_moon_32), fui::bitmapFromIcon(icon_refresh_cw_32),
-        fui::bitmapFromIcon(icon_reader_text_24), fui::bitmapFromIcon(icon_pointer_32),
+        fui::bitmapFromIcon(icon_moon_32),
+        fui::bitmapFromIcon(icon_refresh_cw_32),
+        fui::bitmapFromIcon(icon_reader_text_24),
+        fui::bitmapFromIcon(icon_pointer_32),
+        fui::bitmapFromIcon(icon_book_open_32),
+        fui::bitmapFromIcon(icon_moon_filled_32),
         fui::bitmapFromIcon(SETTINGS.ble.enabled ? icon_bluetooth_32 : icon_bluetooth_off_32)};
-    const bool enabled[kTileCount] = {SETTINGS.screenInverted != 0, false, false,
+    const bool enabled[kTileCount] = {SETTINGS.screenInverted != 0,
+                                      false,
+                                      false,
                                       SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF,
+                                      false,
+                                      false,
                                       SETTINGS.ble.enabled != 0};
     static constexpr fui::Rotation rotations[] = {fui::Rotation::None, fui::Rotation::CW90, fui::Rotation::R180,
                                                   fui::Rotation::CCW90};

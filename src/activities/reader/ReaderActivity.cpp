@@ -1,5 +1,7 @@
 #include "ReaderActivity.h"
 
+#include "activities/ActivityResult.h"
+
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
@@ -31,13 +33,17 @@ ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedIn
 }
 
 std::unique_ptr<ReaderActivity> ReaderActivity::create(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                                       std::string path, const bool allowFastInitialRefresh) {
+                                                       std::string path, const bool allowFastInitialRefresh,
+                                                       std::optional<ChapterResult> initialChapter,
+                                                       std::optional<uint32_t> initialPage) {
   // ActivityManager requires heap ownership; each branch allocates exactly one screen-lifetime object.
   std::unique_ptr<ReaderActivity> activity;
   if (FsHelpers::hasXtcExtension(path)) {
     activity = makeUniqueNoThrow<XtcReaderActivity>(renderer, mappedInput, std::move(path), allowFastInitialRefresh);
+    if (activity) activity->initialPage = initialPage;
   } else {
     activity = makeUniqueNoThrow<EpubReaderActivity>(renderer, mappedInput, std::move(path), allowFastInitialRefresh);
+    if (activity) activity->initialChapter = std::move(initialChapter);
   }
 
   if (!activity) {
@@ -76,6 +82,7 @@ void ReaderActivity::onEnter() {
 
   // Before fonts load and pages are laid out, so the book's own text settings drive both.
   if (!FsHelpers::hasXtcExtension(bookPath)) book_reader_settings::enter(bookPath);
+  last_page::begin();
   sdFontSystem.ensureLoaded(renderer);
   applyInitialOrientation();
 
@@ -125,6 +132,7 @@ void ReaderActivity::onExit() {
   endOfBookOptions.reset();
   endOfBookOptionsReady.store(false, std::memory_order_release);
   book_reader_settings::exit();
+  last_page::persist(renderer);
 }
 
 void ReaderActivity::prepareForSleep() {

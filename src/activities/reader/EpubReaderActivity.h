@@ -15,6 +15,7 @@
 #include "ClipSelectionActivity.h"
 #include "EpubReaderMenuActivity.h"
 #include "LinkNoteTitle.h"
+#include "PageTurnQueue.h"
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
 #include "ReaderToolbarUi.h"
@@ -34,7 +35,7 @@ class EpubReaderActivity final : public ReaderActivity {
   std::optional<uint32_t> pendingOffsetJump;
   unsigned long lastPageTurnTime = 0UL;
   unsigned long pageTurnDuration = 0UL;
-  int8_t pendingManualTurn = 0;
+  PageTurnQueue pendingTurns;
   bool pendingManualTurnTouch = false;
   bool pendingPercentJump = false;
   float pendingSpineProgress = 0.0f;
@@ -45,6 +46,7 @@ class EpubReaderActivity final : public ReaderActivity {
   bool skipNextButtonCheck = false;
   bool automaticPageTurnActive = false;
   bool showBookmarkMessage = false;
+  bool noBookmarksMessage = false;  // the bookmark popup says "No bookmarks"
   bool showDictionaryMessage = false;
   unsigned long dictionaryMessageTime = 0UL;
   bool showFontDamagedMessage = false;
@@ -165,6 +167,7 @@ class EpubReaderActivity final : public ReaderActivity {
   void rememberCurrentContentOffset();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   void jumpToPercent(int percent);
+  void jumpToLatestBookmark();
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   int currentTocIndex() const;
   // Live section position, or the values cached before a child screen

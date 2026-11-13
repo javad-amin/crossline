@@ -34,8 +34,8 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   uint8_t touchModeRestore = CrossPointSettings::TOUCH_READER_ON;
   int panelBottom = 0;
 
-  // Quick settings, left to right: night mode, refresh, orientation, touch, Bluetooth.
-  static constexpr int kTileCount = 5;
+  // Quick settings, left to right: night mode, refresh, orientation, touch, Home, Sleep, Bluetooth.
+  static constexpr int kTileCount = 7;
 
   // SliderRowProps embeds a StyleSet, so keep it off the render stack.
   freeink::ui::SliderRowProps rowProps;

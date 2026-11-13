@@ -4,6 +4,7 @@
 
 #include "./FileBrowserActivity.h"
 #include "RecentBooksStore.h"
+#include "components/OptionPopup.h"
 #include "activities/Activity.h"
 #include "components/CoverGridHomeUi.h"
 #include "util/ButtonNavigator.h"
@@ -14,6 +15,7 @@ class HomeActivity final : public Activity {
   std::unique_ptr<CoverGridHomeUi> coverGridUi;
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
+  OptionPopup bookOptionsPopup;
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;
@@ -65,6 +67,7 @@ class HomeActivity final : public Activity {
   }
   void onRecentBookSelected(const std::string& path);
   void onFileBrowserOpen();
+  void onGamesOpen();
   void onLibraryOpen();
   void onSettingsOpen();
   void onFileTransferOpen();
@@ -76,10 +79,13 @@ class HomeActivity final : public Activity {
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer
   void loadRecentBooks(int maxBooks);
+  void loadRandomHomeBook();
   void loadRecentCovers(int coverHeight);
   void fillCoverGridFromLibrary();
   void resolveGridCoverPaths();
   void loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
+  void promptPinBook(int index);
+  void openChapterSelector(const RecentBook& book);
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,

@@ -1,3 +1,19 @@
+# Crossline
+
+Crossline is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader), rebased on CrossPoint 2.x and adapted for Crossline features. Everything below the Crossline section is the upstream CrossPoint README content.
+
+## What Crossline adds (on CrossPoint 2.x)
+
+- **Title List home theme enhancements**: Title List shows recent books by title/author with saved reading progress; the latest book is highlighted. Title-list rows keep consistent sizing and support optional faded Home Background from the last sleep image.
+- **Home Books / Random Home Book / Home Background settings**: show 1–10 recent books, optionally replace the top Title List row with a random library book (uses existing library index), and optionally show a faded copy of the last sleep image behind the Title List.
+- **Title List book actions (pin/hide/chapter)**: long-press a title-list book (touch long-press or Confirm hold on buttons) to pin/unpin it, hide it from Home without deleting the file, or open an EPUB/XTC chapter selector and start reading at the selected chapter. Pinned books are persisted and kept visible in Home; Home can open the latest read book quickly.
+- **Bookmark shortcuts while reading EPUBs**: long-press button behavior can be set to Bookmark Navigation (left long-press toggles bookmark, right long-press jumps to the latest bookmark). “Jump to latest bookmark” is also available from the reader menu/More actions (2.x UI adaptation), in addition to existing bookmark actions.
+- **Hidden Games screen with Sudoku**: swipe from Home to open Games and play Sudoku (multiple difficulties, touch/button controls, saved progress, completion prompt). Developer difficulty remains available for development but hidden from the normal UI.
+- **Transparent sleep improvements**: transparent sleep falls back to the custom sleep image when no transparent overlay image is available, and transparent sleep can overlay the last read book page (including when sleeping from Home/other screens) using a saved last-page snapshot.
+- **Home and Sleep in control center**: quick actions for Home and Sleep are available in the 2.x control/frontlight panel.
+- **Smoother reading**: queued EPUB page turns during rendering for rapid inputs (adapted to 2.x reader flow) and UC8279 image-refresh behavior improvements for smoother image pages.
+- **Crossline settings/per-book behavior preserved where applicable**: Crossline-specific settings and existing 2.x per-book reader settings behavior are retained/adapted alongside the above features.
+
 # CrossPoint Reader
 
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)

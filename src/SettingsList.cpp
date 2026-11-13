@@ -52,9 +52,16 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
   emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, homeThemeValues(), "uiTheme",
                          StrId::STR_CAT_DISPLAY));
   emit(SettingInfo::Enum(StrId::STR_HOME_BOOK_COUNT, &CrossPointSettings::homeTitleListBooks,
-                         {StrId::STR_HOME_BOOKS_1, StrId::STR_HOME_BOOKS_2, StrId::STR_HOME_BOOKS_4,
-                          StrId::STR_HOME_BOOKS_6, StrId::STR_HOME_BOOKS_10},
+                         {StrId::STR_HOME_BOOKS_1, StrId::STR_HOME_BOOKS_2, StrId::STR_HOME_BOOKS_3,
+                          StrId::STR_HOME_BOOKS_4, StrId::STR_HOME_BOOKS_5, StrId::STR_HOME_BOOKS_6,
+                          StrId::STR_HOME_BOOKS_7, StrId::STR_HOME_BOOKS_8, StrId::STR_HOME_BOOKS_9,
+                          StrId::STR_HOME_BOOKS_10},
                          "homeTitleListBooks", StrId::STR_CAT_DISPLAY));
+  emit(SettingInfo::Toggle(StrId::STR_RANDOM_HOME_BOOK, &CrossPointSettings::homeRandomBook, "homeRandomBook",
+                           StrId::STR_CAT_DISPLAY));
+  emit(SettingInfo::Enum(StrId::STR_HOME_BACKGROUND, &CrossPointSettings::homeBackground,
+                         {StrId::STR_STATE_OFF, StrId::STR_HOME_BACKGROUND_SLEEP_IMAGE}, "homeBackground",
+                         StrId::STR_CAT_DISPLAY));
   if (!BoardConfig::hasTouch())
     emit(SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                              StrId::STR_CAT_DISPLAY));
@@ -177,7 +184,7 @@ void forEachBaseSetting(SettingVisitor visit, void* context) {
                              "frontButtonFollowOrientation", StrId::STR_CAT_CONTROLS));
   emit(SettingInfo::Enum(StrId::STR_LONG_PRESS_BEHAVIOR, &CrossPointSettings::longPressButtonBehavior,
                          {StrId::STR_LONG_PRESS_BEHAVIOR_OFF, StrId::STR_LONG_PRESS_BEHAVIOR_SKIP,
-                          StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION},
+                          StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION, StrId::STR_LONG_PRESS_BEHAVIOR_BOOKMARKS},
                          "longPressButtonBehavior", StrId::STR_CAT_CONTROLS));
   emit(buildLongPressMenuSetting());
   // Double-click power frontlight shortcut only exists on the X4 Pro.

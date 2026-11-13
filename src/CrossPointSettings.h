@@ -199,6 +199,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     OFF = 0,
     CHAPTER_SKIP = 1,
     ORIENTATION_CHANGE = 2,
+    BOOKMARK_NAVIGATION = 3,
     LONG_PRESS_BUTTON_BEHAVIOR_COUNT
   };
 
@@ -360,11 +361,17 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t uiTheme = LYRA;
 #endif
   // Title List home: index into HOME_TITLE_LIST_COUNTS.
-  static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 4, 6, 10};
-  uint8_t homeTitleListBooks = 4;
+  static constexpr uint8_t HOME_TITLE_LIST_COUNTS[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  static constexpr uint8_t HOME_TITLE_LIST_DEFAULT_INDEX = 9;
+  uint8_t homeTitleListBooks = HOME_TITLE_LIST_DEFAULT_INDEX;
   int getHomeTitleListBookCount() const {
-    return HOME_TITLE_LIST_COUNTS[homeTitleListBooks < sizeof(HOME_TITLE_LIST_COUNTS) ? homeTitleListBooks : 4];
+    return HOME_TITLE_LIST_COUNTS[homeTitleListBooks < sizeof(HOME_TITLE_LIST_COUNTS) ? homeTitleListBooks
+                                                                                    : HOME_TITLE_LIST_DEFAULT_INDEX];
   }
+  // Title List home: replace the top row with a random library book.
+  uint8_t homeRandomBook = 0;
+  // Title List home: optional faded sleep image behind the list.
+  uint8_t homeBackground = 0;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
   // Power button return from footnotes (1 = enabled, 0 = disabled)

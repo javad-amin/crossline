@@ -1,5 +1,7 @@
 #pragma once
 
+#include <HalMemory.h>
+
 #include <array>
 #include <string>
 #include <vector>
@@ -26,6 +28,7 @@ class CoverGridHomeUi final : public UiAppHost {
   void refreshCoverPaths();
   void setSelection(int selection) { selected = selection; }
   int selectedAction(const MappedInputManager& input);
+  bool wasLongPress() const { return lastLongPress; }
   // Exact generation height, shared by every slot and recorded during draw.
   // Thumbs must be generated at the drawn size: rescaling a dithered 1-bit
   // image aliases badly.
@@ -56,6 +59,7 @@ class CoverGridHomeUi final : public UiAppHost {
   bool thumbHeightChanged = false;
   int selected = 0;
   int pending = -1;
+  bool lastLongPress = false;
   int progress = -1;
   bool hasOpds = false;
   bool hasContinueReading = false;
@@ -63,6 +67,7 @@ class CoverGridHomeUi final : public UiAppHost {
   int titleSlots = MAX_TITLE_BOOKS;
   uint8_t rowRadius = 0;
   char progressText[12]{};
+  HalMemory::PsramBuffer background;
   // Component styles and interaction tables stay off the render task's stack.
   freeink::ui::BookCardProps card;
   freeink::ui::CoverGridProps grid;
