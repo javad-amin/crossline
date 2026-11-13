@@ -525,6 +525,7 @@ void GamesActivity::render(RenderLock&&) {
           if (name == "calculator") name = "Calculator";
           else if (name == "stopwatch") name = "Stopwatch";
           else if (name == "notes") name = "Notes";
+          else if (name == "wikipedia") name = "Wikipedia";
         }
         char buf[64];
         snprintf(buf, sizeof(buf), "Unhide: %s", name.c_str());
@@ -575,7 +576,8 @@ void GamesActivity::render(RenderLock&&) {
         } else {
           if (std::string(item.id) == "calculator") name = "Calculator";
           else if (std::string(item.id) == "stopwatch") name = "Stopwatch";
-          else name = "Notes";
+          else if (std::string(item.id) == "notes") name = "Notes";
+          else name = "Wikipedia";
         }
         char buf[64];
         if (pinned) snprintf(buf, sizeof(buf), "* %s", name); else snprintf(buf, sizeof(buf), "%s", name);
