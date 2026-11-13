@@ -28,10 +28,19 @@
 
 namespace {
 constexpr const char* kWikiDir = "/wikipedia";
+constexpr const char* kWikiSettingsPath = "/.crosspoint/wikipedia.json";
 constexpr size_t kMaxSearchBytes = 48 * 1024;
 constexpr size_t kMaxParseBytes = 220 * 1024;  // bounded for RAM
 constexpr size_t kMaxTextChars = 120 * 1024;
 constexpr int kMaxImages = 20;
+
+const WikipediaActivity::LangOption kWikiLanguages[] = {
+    {"en", "English"}, {"fa", "Persian"}, {"sv", "Swedish"}, {"ar", "Arabic"}, {"de", "German"},
+    {"fr", "French"}, {"es", "Spanish"}, {"it", "Italian"}, {"pt", "Portuguese"}, {"nl", "Dutch"},
+    {"ru", "Russian"}, {"uk", "Ukrainian"}, {"tr", "Turkish"}, {"ja", "Japanese"}, {"zh", "Chinese"},
+    {"ko", "Korean"}, {"he", "Hebrew"}, {"hi", "Hindi"},
+};
+constexpr size_t kWikiLanguageCount = sizeof(kWikiLanguages) / sizeof(kWikiLanguages[0]);
 
 bool ensureDir(const char* path) {
   if (Storage.exists(path)) return true;
@@ -389,11 +398,74 @@ std::string buildXhtmlFromParseHtml(const std::string& title, const std::string&
 WikipediaActivity::WikipediaActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("Wikipedia", renderer, mappedInput) {}
 
+void WikipediaActivity::loadSettings() {
+  selectedLanguages.clear();
+  char buf[512];
+  const size_t n = Storage.readFileToBuffer(kWikiSettingsPath, buf, sizeof(buf) - 1);
+  if (n > 0) {
+    buf[n] = '\0';
+    JsonDocument doc;
+    if (!deserializeJson(doc, buf) && doc["languages"].is<JsonArray>()) {
+      for (JsonVariant v : doc["languages"].as<JsonArray>()) {
+        const char* code = v | "";
+        if (code && *code) selectedLanguages.emplace_back(code);
+      }
+    }
+  }
+  ensureDefaultLanguages();
+}
+
+void WikipediaActivity::ensureDefaultLanguages() {
+  if (selectedLanguages.empty()) selectedLanguages.push_back("en");
+  // de-dup while preserving order
+  std::vector<std::string> uniq;
+  for (const auto& c : selectedLanguages) {
+    if (std::find(uniq.begin(), uniq.end(), c) == uniq.end()) uniq.push_back(c);
+  }
+  selectedLanguages.swap(uniq);
+  searchLang = selectedLanguages.front();
+}
+
+void WikipediaActivity::saveSettings() const {
+  JsonDocument doc;
+  JsonArray arr = doc["languages"].to<JsonArray>();
+  for (const auto& c : selectedLanguages) arr.add(c);
+  doc["default"] = selectedLanguages.empty() ? "en" : selectedLanguages.front().c_str();
+  PersistableStoreBase::writeDocToFile(kWikiSettingsPath, doc);
+}
+
+bool WikipediaActivity::isLanguageSelected(const std::string& code) const {
+  return std::find(selectedLanguages.begin(), selectedLanguages.end(), code) != selectedLanguages.end();
+}
+
+void WikipediaActivity::toggleLanguage(const std::string& code) {
+  auto it = std::find(selectedLanguages.begin(), selectedLanguages.end(), code);
+  if (it == selectedLanguages.end()) selectedLanguages.push_back(code);
+  else if (selectedLanguages.size() > 1) selectedLanguages.erase(it);
+  ensureDefaultLanguages();
+  saveSettings();
+}
+
+const char* WikipediaActivity::languageName(const std::string& code) const {
+  for (size_t i = 0; i < kWikiLanguageCount; ++i) {
+    if (code == kWikiLanguages[i].code) return kWikiLanguages[i].name;
+  }
+  return code.c_str();
+}
+
+void WikipediaActivity::showMenu() {
+  state = State::IdleMenu;
+  statusLine.clear();
+  needsRedraw = true;
+  requestUpdate();
+}
+
 void WikipediaActivity::onEnter() {
   Activity::onEnter();
   ensureDir("/.crosspoint");
   ensureDir(kWikiDir);
-  promptSearch();
+  loadSettings();
+  showMenu();
 }
 
 std::string WikipediaActivity::urlEncodeComponent(const std::string& s) const {
@@ -441,7 +513,7 @@ void WikipediaActivity::promptSearch() {
     auto wifi = std::make_unique<WifiSelectionActivity>(renderer, mappedInput);
     startActivityForResult(std::move(wifi), [this](const ActivityResult& result) {
       wifiSelectionPending = false;
-      if (result.isCancelled || WiFi.status() != WL_CONNECTED) { finish(); return; }
+      if (result.isCancelled || WiFi.status() != WL_CONNECTED) { showMenu(); return; }
       promptSearch();
     });
     return;
@@ -451,9 +523,9 @@ void WikipediaActivity::promptSearch() {
   needsRedraw = true;
   auto keyboard = std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, "Wikipedia", currentQuery, 80);
   startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
-    if (result.isCancelled) { finish(); return; }
+    if (result.isCancelled) { showMenu(); return; }
     const auto q = trimCopy(std::get<KeyboardResult>(result.data).text);
-    if (q.empty()) { finish(); return; }
+    if (q.empty()) { showMenu(); return; }
     currentQuery = q;
     startSearch(q);
   });
@@ -465,11 +537,14 @@ void WikipediaActivity::startSearch(const std::string& query) {
   needsRedraw = true;
   requestUpdate(true);
   resultTitles.clear(); resultDescs.clear(); selectedResult = 0;
+  ensureDefaultLanguages();
+  searchLang = selectedLanguages.front();
 
   if (WiFi.status() != WL_CONNECTED) { showError("WiFi not connected"); return; }
 
   std::string body; body.reserve(4096); bool truncated = false;
-  const std::string url = "https://en.wikipedia.org/w/api.php?action=opensearch&search=" + urlEncodeComponent(query) + "&limit=8&namespace=0&format=json";
+  const std::string url = "https://" + searchLang + ".wikipedia.org/w/api.php?action=opensearch&search=" +
+                          urlEncodeComponent(query) + "&limit=8&namespace=0&format=json";
   const bool ok = HttpDownloader::fetchUrl(url, [&](const uint8_t* data, size_t len) {
     if (body.size() + len > kMaxSearchBytes) { const size_t room = kMaxSearchBytes > body.size() ? (kMaxSearchBytes - body.size()) : 0; if (room) body.append((const char*)data, room); truncated = true; return false; }
     body.append((const char*)data, len); return true;
@@ -511,14 +586,102 @@ void applyPreferredWikipediaFont(const std::string& bookPath) {
   }
 }
 
-void WikipediaActivity::fetchArticle(int index) {
+void WikipediaActivity::onResultSelected(int index) {
   if (index < 0 || index >= static_cast<int>(resultTitles.size())) return;
+  ensureDefaultLanguages();
+  if (selectedLanguages.size() <= 1) {
+    fetchArticle(searchLang, resultTitles[index]);
+    return;
+  }
+  fetchLangLinksAndPrompt(index);
+}
+
+void WikipediaActivity::fetchLangLinksAndPrompt(int index) {
+  if (index < 0 || index >= static_cast<int>(resultTitles.size())) return;
+  if (WiFi.status() != WL_CONNECTED) { showError("WiFi not connected"); return; }
+
+  state = State::Fetching;
+  statusLine = "Checking languages...";
+  needsRedraw = true;
+  requestUpdate(true);
+
+  pendingDownload = {};
+  pendingDownload.resultIndex = index;
+  pendingDownload.sourceLang = searchLang;
+  pendingDownload.sourceTitle = resultTitles[index];
+
+  std::string body; body.reserve(8192); bool truncated = false;
+  const std::string url = "https://" + searchLang +
+                          ".wikipedia.org/w/api.php?action=query&prop=langlinks&titles=" +
+                          urlEncodeComponent(pendingDownload.sourceTitle) +
+                          "&lllimit=500&format=json&formatversion=2&redirects=1";
+  const bool ok = HttpDownloader::fetchUrl(url, [&](const uint8_t* data, size_t len) {
+    if (body.size() + len > 48 * 1024) {
+      const size_t room = body.size() < 48 * 1024 ? (48 * 1024 - body.size()) : 0;
+      if (room) body.append((const char*)data, room);
+      truncated = true;
+      return false;
+    }
+    body.append((const char*)data, len);
+    return true;
+  }, "", "", std::vector<HttpDownloader::Header>{});
+
+  std::vector<std::pair<std::string, std::string>> found;  // lang -> title
+  if ((ok || truncated) && !body.empty()) {
+    JsonDocument doc;
+    if (!deserializeJson(doc, body)) {
+      JsonArray pages = doc["query"]["pages"].as<JsonArray>();
+      if (!pages.isNull() && pages.size() > 0) {
+        JsonArray lls = pages[0]["langlinks"].as<JsonArray>();
+        if (!lls.isNull()) {
+          for (JsonVariant v : lls) {
+            const char* lang = v["lang"] | "";
+            const char* t = v["title"] | "";
+            if (lang && *lang && t && *t) found.push_back({std::string(lang), std::string(t)});
+          }
+        }
+      }
+    }
+  }
+
+  pendingDownload.langCodes.clear();
+  pendingDownload.langTitles.clear();
+  for (const auto& sel : selectedLanguages) {
+    if (sel == searchLang) {
+      pendingDownload.langCodes.push_back(sel);
+      pendingDownload.langTitles.push_back(pendingDownload.sourceTitle);
+      continue;
+    }
+    for (const auto& kv : found) {
+      if (kv.first == sel) {
+        pendingDownload.langCodes.push_back(sel);
+        pendingDownload.langTitles.push_back(kv.second);
+        break;
+      }
+    }
+  }
+
+  if (pendingDownload.langCodes.empty()) {
+    pendingDownload.langCodes.push_back(searchLang);
+    pendingDownload.langTitles.push_back(pendingDownload.sourceTitle);
+  }
+  if (pendingDownload.langCodes.size() == 1) {
+    fetchArticle(pendingDownload.langCodes[0], pendingDownload.langTitles[0]);
+    return;
+  }
+
+  langSelectIndex = 0;
+  state = State::SelectDownloadLang;
+  needsRedraw = true;
+  requestUpdate();
+}
+
+void WikipediaActivity::fetchArticle(const std::string& lang, const std::string& title) {
   if (WiFi.status() != WL_CONNECTED) { showError("WiFi not connected"); return; }
   state = State::Fetching; statusLine = "Fetching page..."; needsRedraw = true; requestUpdate(true);
 
-  const std::string title = resultTitles[index];
   std::string body; body.reserve(16384); bool truncated = false;
-  const std::string url = "https://en.wikipedia.org/w/api.php?action=parse&page=" + urlEncodeComponent(title) +
+  const std::string url = "https://" + lang + ".wikipedia.org/w/api.php?action=parse&page=" + urlEncodeComponent(title) +
                           "&prop=text|displaytitle&format=json&formatversion=2&redirects=1";
   const bool ok = HttpDownloader::fetchUrl(url, [&](const uint8_t* data, size_t len) {
     if (body.size() + len > kMaxParseBytes) { const size_t room = kMaxParseBytes > body.size() ? (kMaxParseBytes - body.size()) : 0; if (room) body.append((const char*)data, room); truncated = true; return false; }
@@ -613,7 +776,7 @@ void WikipediaActivity::fetchArticle(int index) {
   statusLine = "Building EPUB...";
   needsRedraw = true; requestUpdate(true);
 
-  const std::string safe = sanitizeFilename(finalTitle);
+  const std::string safe = sanitizeFilename(std::string(languageName(lang)) + "-" + finalTitle);
   const std::string epubPath = std::string(kWikiDir) + "/wikipedia-" + safe + ".epub";
   if (Storage.exists(epubPath.c_str())) Storage.remove(epubPath.c_str());
 
@@ -648,9 +811,9 @@ void WikipediaActivity::fetchArticle(int index) {
   const std::string opf = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                           "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"uid\" version=\"3.0\">\n"
                           "  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n"
-                          "    <dc:identifier id=\"uid\">wikipedia:" + htmlEscape(safe) + "</dc:identifier>\n"
+                          "    <dc:identifier id=\"uid\">wikipedia:" + htmlEscape(lang + "-" + safe) + "</dc:identifier>\n"
                           "    <dc:title>Wikipedia: " + htmlEscape(finalTitle) + "</dc:title>\n"
-                          "    <dc:language>en</dc:language>\n"
+                          "    <dc:language>" + htmlEscape(lang) + "</dc:language>\n"
                           "  </metadata>\n"
                           "  <manifest>\n" + manifestItems + "  </manifest>\n"
                           "  <spine>\n" + spineItems + "  </spine>\n"
@@ -670,12 +833,102 @@ void WikipediaActivity::fetchArticle(int index) {
 
 void WikipediaActivity::loop() {
   if (wifiSelectionPending) return;
+
   if (state == State::Error) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasReleased(MappedInputManager::Button::Confirm)) finish();
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      showMenu();
+    }
     return;
   }
-  if (state == State::Results) {
+
+  if (state == State::IdleMenu) {
+    const int count = 2;  // Search, Languages
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) { finish(); return; }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) || mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      menuIndex = (menuIndex + count - 1) % count; needsRedraw = true; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Down) || mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      menuIndex = (menuIndex + 1) % count; needsRedraw = true; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (menuIndex == 0) promptSearch();
+      else { state = State::Settings; settingsIndex = 0; needsRedraw = true; requestUpdate(); }
+      return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const int top = metrics.topPadding + metrics.headerHeight + 30;
+      const int rh = std::max(50, renderer.getLineHeight(UI_12_FONT_ID) + 24);
+      for (int i = 0; i < count; ++i) {
+        const int y = top + i * rh;
+        if (ty >= y && ty < y + rh - 4) {
+          menuIndex = i;
+          if (i == 0) promptSearch();
+          else { state = State::Settings; settingsIndex = 0; needsRedraw = true; requestUpdate(); }
+          return;
+        }
+      }
+    }
+    return;
+  }
+
+  if (state == State::Settings) {
+    const int count = static_cast<int>(kWikiLanguageCount);
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) { showMenu(); return; }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) || mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      settingsIndex = (settingsIndex + count - 1) % count; needsRedraw = true; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Down) || mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      settingsIndex = (settingsIndex + 1) % count; needsRedraw = true; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      toggleLanguage(kWikiLanguages[settingsIndex].code);
+      needsRedraw = true; requestUpdate(); return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const int top = metrics.topPadding + metrics.headerHeight + 8;
+      const int rh = std::max(34, renderer.getLineHeight(UI_10_FONT_ID) + 12);
+      const int margin = std::max(12, metrics.contentSidePadding);
+      if (tx >= margin && tx < renderer.getScreenWidth() - margin && ty >= top) {
+        const int idx = (ty - top) / rh;
+        if (idx >= 0 && idx < count) { settingsIndex = idx; toggleLanguage(kWikiLanguages[idx].code); needsRedraw = true; requestUpdate(); return; }
+      }
+    }
+    return;
+  }
+
+  if (state == State::SelectDownloadLang) {
+    const int count = static_cast<int>(pendingDownload.langCodes.size());
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) { state = State::Results; needsRedraw = true; requestUpdate(); return; }
+    if (count <= 0) { state = State::Results; needsRedraw = true; requestUpdate(); return; }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) || mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      langSelectIndex = (langSelectIndex + count - 1) % count; needsRedraw = true; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Down) || mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      langSelectIndex = (langSelectIndex + 1) % count; needsRedraw = true; requestUpdate(); return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      fetchArticle(pendingDownload.langCodes[langSelectIndex], pendingDownload.langTitles[langSelectIndex]); return;
+    }
+    int tx = 0, ty = 0;
+    if (mappedInput.wasScreenTapped(tx, ty)) {
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      const int top = metrics.topPadding + metrics.headerHeight + 30;
+      const int rh = std::max(44, renderer.getLineHeight(UI_10_FONT_ID) + 18);
+      const int margin = std::max(12, metrics.contentSidePadding);
+      if (tx >= margin && tx < renderer.getScreenWidth() - margin && ty >= top) {
+        const int idx = (ty - top) / rh;
+        if (idx >= 0 && idx < count) { langSelectIndex = idx; fetchArticle(pendingDownload.langCodes[idx], pendingDownload.langTitles[idx]); return; }
+      }
+    }
+    return;
+  }
+
+  if (state == State::Results) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) { showMenu(); return; }
     const int count = static_cast<int>(resultTitles.size());
     if (count > 0) {
       if (mappedInput.wasReleased(MappedInputManager::Button::Up) || mappedInput.wasReleased(MappedInputManager::Button::Left)) {
@@ -684,7 +937,7 @@ void WikipediaActivity::loop() {
       if (mappedInput.wasReleased(MappedInputManager::Button::Down) || mappedInput.wasReleased(MappedInputManager::Button::Right)) {
         selectedResult = (selectedResult + 1) % count; needsRedraw = true; requestUpdate(); return;
       }
-      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) { fetchArticle(selectedResult); return; }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) { onResultSelected(selectedResult); return; }
       int tx = 0, ty = 0;
       if (mappedInput.wasScreenTapped(tx, ty)) {
         const auto& metrics = UITheme::getInstance().getMetrics();
@@ -693,7 +946,7 @@ void WikipediaActivity::loop() {
         const int margin = std::max(12, metrics.contentSidePadding);
         if (tx >= margin && tx < renderer.getScreenWidth() - margin && ty >= top) {
           const int idx = (ty - top) / rh;
-          if (idx >= 0 && idx < count) { selectedResult = idx; fetchArticle(idx); return; }
+          if (idx >= 0 && idx < count) { selectedResult = idx; onResultSelected(idx); return; }
         }
       }
     }
@@ -708,7 +961,7 @@ void WikipediaActivity::render(RenderLock&&) {
   const int margin = std::max(12, metrics.contentSidePadding);
   renderer.drawCenteredText(UI_12_FONT_ID, metrics.topPadding, "Wikipedia", true, EpdFontFamily::BOLD);
 
-  if (state == State::Searching || state == State::Fetching || state == State::Opening || state == State::Idle) {
+  if (state == State::Searching || state == State::Fetching || state == State::Opening) {
     const char* msg = statusLine.empty() ? "Loading..." : statusLine.c_str();
     renderer.drawCenteredText(UI_10_FONT_ID, metrics.topPadding + metrics.headerHeight + 30, msg, true);
     GUI.drawButtonHints(renderer, "Back", "", "", "");
@@ -719,6 +972,61 @@ void WikipediaActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, metrics.topPadding + metrics.headerHeight + 30, "Error", true, EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, metrics.topPadding + metrics.headerHeight + 60, errorMessage.c_str(), true);
     GUI.drawButtonHints(renderer, tr(STR_BACK), tr(STR_SELECT), "", "");
+    renderer.displayBuffer();
+    return;
+  }
+  if (state == State::IdleMenu) {
+    const char* labels[] = {"Search", "Languages"};
+    const int count = 2;
+    int y = metrics.topPadding + metrics.headerHeight + 30;
+    const int rh = std::max(50, renderer.getLineHeight(UI_12_FONT_ID) + 24);
+    for (int i = 0; i < count; ++i) {
+      const bool sel = (i == menuIndex);
+      const int w = renderer.getScreenWidth() - margin * 2;
+      renderer.drawRect(margin, y, w, rh - 4, sel ? 2 : 1, true);
+      if (sel) renderer.fillRect(margin + 2, y + 2, 4, rh - 8);
+      renderer.drawText(UI_12_FONT_ID, margin + 14, y + (rh - 4 - renderer.getLineHeight(UI_12_FONT_ID)) / 2, labels[i],
+                        true);
+      y += rh;
+    }
+    GUI.drawButtonHints(renderer, tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    renderer.displayBuffer();
+    return;
+  }
+  if (state == State::Settings) {
+    renderer.drawCenteredText(SMALL_FONT_ID, metrics.topPadding + metrics.headerHeight + 2, "Available languages", true);
+    int y = metrics.topPadding + metrics.headerHeight + 22;
+    const int rh = std::max(34, renderer.getLineHeight(UI_10_FONT_ID) + 12);
+    const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 6;
+    for (int i = 0; i < static_cast<int>(kWikiLanguageCount); ++i) {
+      if (y + rh > bottom) break;
+      const bool sel = (i == settingsIndex);
+      const bool on = isLanguageSelected(kWikiLanguages[i].code);
+      const int w = renderer.getScreenWidth() - margin * 2;
+      renderer.drawRect(margin, y, w, rh - 4, sel ? 2 : 1, true);
+      if (sel) renderer.fillRect(margin + 2, y + 2, 4, rh - 8);
+      std::string label = std::string(on ? "[x] " : "[ ] ") + kWikiLanguages[i].name + " (" + kWikiLanguages[i].code + ")";
+      renderer.drawText(UI_10_FONT_ID, margin + 12, y + 4, label.c_str(), true);
+      y += rh;
+    }
+    GUI.drawButtonHints(renderer, tr(STR_BACK), "Toggle", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    renderer.displayBuffer();
+    return;
+  }
+  if (state == State::SelectDownloadLang) {
+    renderer.drawCenteredText(UI_10_FONT_ID, metrics.topPadding + metrics.headerHeight + 4, "Select language", true, EpdFontFamily::BOLD);
+    int y = metrics.topPadding + metrics.headerHeight + 30;
+    const int rh = std::max(44, renderer.getLineHeight(UI_10_FONT_ID) + 18);
+    for (int i = 0; i < static_cast<int>(pendingDownload.langCodes.size()); ++i) {
+      const bool sel = (i == langSelectIndex);
+      const int w = renderer.getScreenWidth() - margin * 2;
+      renderer.drawRect(margin, y, w, rh - 4, sel ? 2 : 1, true);
+      if (sel) renderer.fillRect(margin + 2, y + 2, 4, rh - 8);
+      std::string label = std::string(languageName(pendingDownload.langCodes[i])) + " (" + pendingDownload.langCodes[i] + ")";
+      renderer.drawText(UI_10_FONT_ID, margin + 12, y + 6, label.c_str(), true);
+      y += rh;
+    }
+    GUI.drawButtonHints(renderer, tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     renderer.displayBuffer();
     return;
   }
