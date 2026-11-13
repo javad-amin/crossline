@@ -12,6 +12,7 @@
 #include "../apps/CalculatorActivity.h"
 #include "../apps/StopwatchActivity.h"
 #include "../apps/NotesActivity.h"
+#include "../apps/WikipediaActivity.h"
 #include "ConnectFourActivity.h"
 #include "MappedInputManager.h"
 #include "MinesweeperActivity.h"
@@ -55,6 +56,7 @@ const GamesActivity::Item GamesActivity::kApps[] = {
     {"calculator", nullptr, nullptr},
     {"stopwatch", nullptr, nullptr},
     {"notes", nullptr, nullptr},
+    {"wikipedia", nullptr, nullptr},
 };
 
 GamesActivity::GamesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -172,6 +174,7 @@ void GamesActivity::openSelectedIndex(int idx) {
       case 0: if (auto a = makeUniqueNoThrow<CalculatorActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
       case 1: if (auto a = makeUniqueNoThrow<StopwatchActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
       case 2: if (auto a = makeUniqueNoThrow<NotesActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
+      case 3: if (auto a = makeUniqueNoThrow<WikipediaActivity>(renderer, mappedInput)) startActivityForResult(std::move(a), [](const ActivityResult&){}); return;
       default: return;
     }
   }
@@ -297,7 +300,8 @@ void GamesActivity::showItemOptions(Tab tab, int visibleIndex) {
     const std::string id = item.id;
     if (id == "calculator") title = "Calculator";
     else if (id == "stopwatch") title = "Stopwatch";
-    else title = "Notes";
+    else if (id == "notes") title = "Notes";
+    else title = "Wikipedia";
   }
   optionPopup.show("Options", title.c_str(), opts, 3, 0, [this, tab, id = item.id](int choice) {
     if (choice == 0) {

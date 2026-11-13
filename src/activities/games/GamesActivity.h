@@ -67,5 +67,5 @@ class GamesActivity final : public Activity {
   static const Item kGames[];
   static const Item kApps[];
   static constexpr int kGameCount = 6;
-  static constexpr int kAppCount = 3;
+  static constexpr int kAppCount = 4;
 };
