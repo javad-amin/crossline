@@ -21,10 +21,12 @@ void NonogramsProgressStore::toJson(JsonDocument& doc) const {
 
   JsonArray sol = doc["solution"].to<JsonArray>();
   JsonArray grid = doc["grid"].to<JsonArray>();
-  const int total = savedN * savedN;
-  for (int i = 0; i < total; ++i) {
-    sol.add(savedSolution[i]);
-    grid.add(static_cast<uint8_t>(savedGrid[i]));
+  for (int y = 0; y < savedN; ++y) {
+    for (int x = 0; x < savedN; ++x) {
+      const int i = y * MAX_N + x;
+      sol.add(savedSolution[i]);
+      grid.add(static_cast<uint8_t>(savedGrid[i]));
+    }
   }
 }
 
@@ -60,20 +62,29 @@ bool NonogramsProgressStore::fromJson(const JsonVariantConst doc) {
   std::array<Mark, MAX_N * MAX_N> grid{};
   int idx = 0;
   for (const JsonVariantConst v : solArr) {
-    if (!v.is<int>()) return false;
+    if (!v.is<int>() || idx >= total) return false;
     const int b = v.as<int>();
     if (b != 0 && b != 1) return false;
-    sol[idx++] = static_cast<uint8_t>(b);
+    const int y = idx / n;
+    const int x = idx % n;
+    sol[y * MAX_N + x] = static_cast<uint8_t>(b);
+    ++idx;
   }
+  if (idx != total) return false;
   idx = 0;
   for (const JsonVariantConst v : gridArr) {
-    if (!v.is<int>()) return false;
+    if (!v.is<int>() || idx >= total) return false;
     const int m = v.as<int>();
     if (m < 0 || m > 2) return false;
-    grid[idx++] = static_cast<Mark>(m);
+    const int y = idx / n;
+    const int x = idx % n;
+    grid[y * MAX_N + x] = static_cast<Mark>(m);
+    ++idx;
   }
+  if (idx != total) return false;
 
-  // basic consistency: filled marks can't contradict solution? allow player marks freely except win flag is recomputed-ish
+  // basic consistency: filled marks can't contradict solution? allow player marks freely except win flag is
+  // recomputed-ish
   savedN = n;
   savedDifficulty = static_cast<Difficulty>(difficulty);
   savedSolution = sol;
